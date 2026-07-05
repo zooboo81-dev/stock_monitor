@@ -2,8 +2,10 @@ streamlit>=1.32.0
 pandas>=2.1.0
 requests>=2.31.0
 yfinance>=0.2.40
-winotify>=1.1.0
 streamlit-autorefresh>=1.0.1
 feedparser>=6.0.10
 truststore>=0.10.0
 plotly>=5.20.0
+
+# 註：winotify 移除（雲端不需要 Windows Toast）
+# 註：shioaji 移除（雲端無法登入，只本機用）

@@ -1,0 +1,39 @@
+name: TAIEX MA Tracker
+
+on:
+  schedule:
+    # 台灣 14:00 = UTC 06:00（週一至五）
+    - cron: '0 6 * * 1-5'
+  workflow_dispatch:  # 允許手動觸發測試
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: |
+          pip install yfinance requests pandas numpy
+
+      - name: Run tracker
+        run: python taiex_ma_tracker.py
+
+      - name: Commit state
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/taiex_ma_state.json data/notifications.jsonl
+          git diff --staged --quiet && echo "無變動" || (git commit -m "chore: update TAIEX MA state" && git push)

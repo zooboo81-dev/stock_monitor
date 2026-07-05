@@ -1,0 +1,57 @@
+# ================================================================
+# 真正機密 — 絕不上 GitHub
+# ================================================================
+telegram_config.json
+shioaji_config.json
+"API key.txt"
+shioaji_keys.txt
+data/cash.json
+
+# 開發/測試檔（會有硬編碼密碼）
+_init_journal.py
+_backfill_recs.py
+_remind_2327.py
+_remind_2327.vbs
+_remind_00631L.py
+_remind_00631L.vbs
+_diag_*.py
+
+# 桌機專用（雲端不需要）
+start_hidden.vbs
+run_*.vbs
+allow_phone_access.bat
+
+# Python 標準
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+data/intraday_alert.log
+
+# 註：以下資料檔「保留」到 GitHub（cloud runs 需要 state）
+# - data/notifications.jsonl (通知歷史)
+# - data/taiex_ma_state.json (MA 追蹤 state)
+# - data/recs_history.jsonl (推薦 snapshot 歷史)
+# - data/watchlist.json (觀察名單)
+# - data/journal_pending.json (Journal 待填清單)
+# - data/portfolio_snapshot.json (Portfolio snapshot)
+# - data/trailing_state.json (Trailing stop state)
+# - data/scoreboard.png (TXF 記分板圖)
+# - portfolio.csv (持倉，公開)
+# - cooldown.json (冷卻名單)
+#
+# 為什麼？雲端排程要「讀」上次狀態，寫「新」狀態 → 必須存 GitHub
+# 你的 repo 是 Private，只有你能看

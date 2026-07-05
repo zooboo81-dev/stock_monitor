@@ -1,0 +1,36 @@
+name: Recommendations Snapshot
+
+on:
+  schedule:
+    # 台灣 17:30 = UTC 09:30（週一至五）
+    - cron: '30 9 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run snapshot
+        run: python recs_snapshot.py
+
+      - name: Commit updates
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/recs_history.jsonl data/notifications.jsonl
+          git diff --staged --quiet && echo "無變動" || (git commit -m "chore: update recs snapshot" && git push)

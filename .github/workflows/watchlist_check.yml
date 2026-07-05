@@ -1,0 +1,36 @@
+name: Watchlist Check
+
+on:
+  schedule:
+    # 台灣 14:40 = UTC 06:40（週一至五）
+    - cron: '40 6 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run watchlist
+        run: python watchlist_check.py
+
+      - name: Commit notifications
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/notifications.jsonl
+          git diff --staged --quiet && echo "無變動" || (git commit -m "chore: watchlist check" && git push)

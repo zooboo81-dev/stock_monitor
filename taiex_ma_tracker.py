@@ -25,12 +25,15 @@ import sys
 from datetime import date
 from pathlib import Path
 
+# 桌機 pythonw 排程沒 stdout；雲端 Linux 有，這段仍安全
 for _s in ("stdout", "stderr"):
     if getattr(sys, _s) is None:
         setattr(sys, _s, open(os.devnull, "w", encoding="utf-8"))
 
+# 雲端跑時，工作目錄可能不是這裡 → 切到腳本所在目錄
 os.chdir(Path(__file__).resolve().parent)
 
+# truststore 是桌機用（Windows 憑證），雲端 Linux 不用
 try:
     import truststore
     truststore.inject_into_ssl()

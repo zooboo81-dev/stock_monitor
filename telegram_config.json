@@ -1,8 +1,0 @@
-{
-  "_comment": "Telegram bot 設定 — 把這份檔案放在本機，不要外傳",
-  "_setup_instruction": "1. 從 BotFather 取 token 貼到 bot_token；2. Chat ID 已填好",
-  "enabled": true,
-  "bot_token": "8975349528:AAFA-UbpjQsoR7c3QvlqlwBHGQxMXuiTgdk",
-  "chat_id": "7711650858",
-  "bot_username": "@zooboo_Irobot_bot"
-}

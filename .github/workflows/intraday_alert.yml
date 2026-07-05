@@ -1,0 +1,36 @@
+name: Intraday Alert
+
+on:
+  schedule:
+    # 台灣 9:00-13:35 每 5 分鐘 = UTC 01:00-05:35
+    - cron: '*/5 1-5 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run alert
+        run: python intraday_alert.py
+
+      - name: Commit
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/intraday_state.json data/notifications.jsonl
+          git diff --staged --quiet && echo "無變動" || (git commit -m "chore: intraday alert" && git push)

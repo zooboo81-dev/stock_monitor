@@ -503,6 +503,111 @@ if c_btn.button("🔄 立即刷新"):
     st.rerun()
 
 
+# ──────────────── 🔔 通知中心 ────────────────
+def _load_notifications():
+    from pathlib import Path as _P
+    import json as _json
+    nf = _P("data/notifications.jsonl")
+    if not nf.exists():
+        return []
+    out = []
+    for line in nf.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(_json.loads(line))
+        except Exception:
+            continue
+    return sorted(out, key=lambda x: x.get("ts", ""), reverse=True)
+
+
+def _save_notifications(records):
+    from pathlib import Path as _P
+    import json as _json
+    nf = _P("data/notifications.jsonl")
+    nf.write_text(
+        "\n".join(_json.dumps(r, ensure_ascii=False) for r in records) + "\n",
+        encoding="utf-8",
+    )
+
+
+_all_notifs = _load_notifications()
+_unread = [n for n in _all_notifs if not n.get("read", False)]
+_recent_24h = []
+try:
+    import datetime as _dt
+    _cutoff = _dt.datetime.now() - _dt.timedelta(hours=24)
+    for _n in _all_notifs:
+        try:
+            _nts = _dt.datetime.fromisoformat(_n.get("ts", ""))
+            if _nts >= _cutoff:
+                _recent_24h.append(_n)
+        except Exception:
+            pass
+except Exception:
+    pass
+
+# 頂部：未讀提示 + 展開按鈕
+if _unread:
+    with st.container():
+        _cn1, _cn2 = st.columns([5, 1])
+        _cn1.markdown(
+            f"<div style='background:#fff3e0; border-left:6px solid #ff8f00; "
+            f"padding:8px 14px; border-radius:6px; color:#1a1a1a; font-size:13px;'>"
+            f"🔔 <b>{len(_unread)} 則未讀通知</b>　"
+            f"<span style='color:#666'>最新：{_unread[0].get('title', '')} "
+            f"（{_unread[0].get('ts', '')[-8:]}）</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        if _cn2.button("✅ 全部標為已讀", key="mark_all_read"):
+            for _n in _all_notifs:
+                _n["read"] = True
+            _save_notifications(_all_notifs)
+            st.rerun()
+
+# 折疊區顯示所有通知
+with st.expander(
+    f"🔔 通知中心（{len(_all_notifs)} 則 / {len(_unread)} 未讀）— 點開查看",
+    expanded=False,
+):
+    if not _all_notifs:
+        st.caption("目前沒有通知")
+    else:
+        # 分未讀/已讀顯示
+        _to_show = _unread if _unread else _all_notifs[:20]
+        for _n in _to_show[:30]:
+            _read = _n.get("read", False)
+            _bg = "#f5f5f5" if _read else "#fff3e0"
+            _border = "#bbb" if _read else "#ff8f00"
+            _title = _n.get("title", "")
+            _body = _n.get("body", "").replace("\n", "<br>")
+            _ts = _n.get("ts", "")
+            st.markdown(
+                f"<div style='background:{_bg}; border-left:4px solid {_border}; "
+                f"padding:8px 12px; border-radius:4px; margin-bottom:6px; "
+                f"color:#1a1a1a; font-size:12px;'>"
+                f"<div style='display:flex; justify-content:space-between'>"
+                f"<b>{'✅ ' if _read else '🔔 '}{_title}</b>"
+                f"<span style='color:#666; font-size:11px'>{_ts}</span>"
+                f"</div>"
+                f"<div style='margin-top:4px; color:#333'>{_body}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        if len(_all_notifs) > 30:
+            st.caption(f"（僅顯示最新 30 則，共 {len(_all_notifs)} 則）")
+
+# 未讀 → 用 st.toast 彈提醒（Streamlit 1.28+）
+try:
+    if _unread and len(_unread) <= 3:
+        for _n in _unread[:3]:
+            st.toast(f"🔔 {_n.get('title', '')}", icon="🔔")
+except Exception:
+    pass
+
+
 # ──────────────── TXF 訊號 + 總資產 BANNER ────────────────
 def _read_txf_signal():
     """讀台指期 scoreboard log 最新訊號（訊號優先）"""

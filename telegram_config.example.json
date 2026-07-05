@@ -1,0 +1,8 @@
+{
+  "_comment": "Telegram bot 設定範本 — 複製為 telegram_config.json 後填入你的 token",
+  "_setup_instruction": "1. 跟 BotFather 對話取 token；2. 傳訊息給 bot 後從 https://api.telegram.org/bot<TOKEN>/getUpdates 找 chat_id",
+  "enabled": true,
+  "bot_token": "YOUR_BOT_TOKEN_HERE",
+  "chat_id": "YOUR_CHAT_ID_HERE",
+  "bot_username": "@your_bot"
+}
