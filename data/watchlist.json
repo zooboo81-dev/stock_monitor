@@ -1,0 +1,19 @@
+{
+  "_comment": "觀察名單 — 未達進場條件但有潛力的標的。每日 14:35 排程檢查",
+  "_format": "code: { name, added_date, reason, trigger_condition, notes }",
+  "6274": {
+    "name": "台燿",
+    "market": "OTC",
+    "added_date": "2026-06-30",
+    "current_price": 1680,
+    "reason": "EV +9.45% 勝率 67% 樣本 21 體質頂級，但評分 +1 缺法人訊號",
+    "trigger_condition": {
+      "any_of": [
+        "評分 ≥ +3 且法人連 3 日買超",
+        "回測 1450-1550 且 KD 黃金交叉",
+        "30 日報酬 ≤ +20%"
+      ]
+    },
+    "notes": "上櫃股，20 日均量 6,253 張、金額 101 億流動性充足。今日 +8.03% 追高警戒。"
+  }
+}

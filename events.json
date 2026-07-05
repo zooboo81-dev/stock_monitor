@@ -1,0 +1,102 @@
+[
+  {
+    "date": "2026-06-17",
+    "name": "FOMC 利率決議",
+    "impact": "high",
+    "category": "fed",
+    "note": "Fed 6 月會議，市場關注降息路徑"
+  },
+  {
+    "date": "2026-07-29",
+    "name": "FOMC 利率決議",
+    "impact": "high",
+    "category": "fed"
+  },
+  {
+    "date": "2026-09-16",
+    "name": "FOMC 利率決議",
+    "impact": "high",
+    "category": "fed"
+  },
+  {
+    "date": "2026-10-28",
+    "name": "FOMC 利率決議",
+    "impact": "high",
+    "category": "fed"
+  },
+  {
+    "date": "2026-12-16",
+    "name": "FOMC 利率決議",
+    "impact": "high",
+    "category": "fed"
+  },
+  {
+    "date": "2026-06-11",
+    "name": "美 5 月 CPI 公布",
+    "impact": "high",
+    "category": "cpi"
+  },
+  {
+    "date": "2026-07-15",
+    "name": "美 6 月 CPI 公布",
+    "impact": "high",
+    "category": "cpi"
+  },
+  {
+    "date": "2026-08-13",
+    "name": "美 7 月 CPI 公布",
+    "impact": "high",
+    "category": "cpi"
+  },
+  {
+    "date": "2026-06-05",
+    "name": "台灣 5 月 CPI 公布",
+    "impact": "medium",
+    "category": "cpi"
+  },
+  {
+    "date": "2026-07-06",
+    "name": "台灣 6 月 CPI 公布",
+    "impact": "medium",
+    "category": "cpi"
+  },
+  {
+    "date": "2026-07-16",
+    "name": "台積電 Q2 法說會",
+    "impact": "high",
+    "category": "earnings",
+    "note": "台股龍頭，影響整個半導體類股"
+  },
+  {
+    "date": "2026-10-15",
+    "name": "台積電 Q3 法說會",
+    "impact": "high",
+    "category": "earnings"
+  },
+  {
+    "date": "2026-08-26",
+    "name": "Nvidia Q2 財報",
+    "impact": "high",
+    "category": "earnings",
+    "note": "AI 題材關鍵指標，影響整個 AI 供應鏈"
+  },
+  {
+    "date": "2026-11-19",
+    "name": "Nvidia Q3 財報",
+    "impact": "high",
+    "category": "earnings"
+  },
+  {
+    "date": "2026-06-10",
+    "name": "台股 5 月營收公布日",
+    "impact": "medium",
+    "category": "macro",
+    "note": "你的 15 檔在這天前後公布 5 月營收，注意異常"
+  },
+  {
+    "date": "2026-07-10",
+    "name": "台股 6 月營收公布日",
+    "impact": "medium",
+    "category": "macro"
+  }
+]

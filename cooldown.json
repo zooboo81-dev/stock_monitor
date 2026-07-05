@@ -1,0 +1,165 @@
+{
+  "_comment": "近期賣出冷卻期 — 30 天內不會被推薦榜推回（避免「賣完又被叫買」的尷尬）",
+  "_format": "code: { sold_date: YYYY-MM-DD, reason: string, cooldown_days: int }",
+  "3706": {
+    "sold_date": "2026-05-19",
+    "reason": "+133% 獲利了結",
+    "cooldown_days": 30
+  },
+  "2376": {
+    "sold_date": "2026-05-22",
+    "reason": "系統無 edge 出清",
+    "cooldown_days": 30
+  },
+  "3661": {
+    "sold_date": "2026-05-22",
+    "reason": "系統無 edge 出清",
+    "cooldown_days": 30
+  },
+  "2408": {
+    "sold_date": "2026-05-19",
+    "reason": "獲利了結",
+    "cooldown_days": 30
+  },
+  "_0050_repurchased": {
+    "note": "0050 在 2026-06-02 以 101.19 買回，原 cooldown 失效"
+  },
+  "00631L": {
+    "sold_date": "2026-06-04",
+    "reason": "槓桿 ETF 法人連賣 + 落袋 +12.82%",
+    "cooldown_days": 30
+  },
+  "1802": {
+    "sold_date": "2026-06-04",
+    "reason": "MACD 死叉 + 法人大賣 + 落袋 +4.36%",
+    "cooldown_days": 30
+  },
+  "2303": {
+    "sold_date": "2026-06-04",
+    "reason": "MACD 死叉 + 停損臨界 + 落袋 +11.84%",
+    "cooldown_days": 30
+  },
+  "0050_2026Q2": {
+    "sold_date": "2026-06-05",
+    "reason": "大跌調節 + 法人連賣",
+    "cooldown_days": 30,
+    "note": "code 0050 (二度賣出)"
+  },
+  "1409": {
+    "sold_date": "2026-06-05",
+    "reason": "停損 27 觸發、落袋 +56% 大贏家",
+    "cooldown_days": 30
+  },
+  "1528": {
+    "sold_date": "2026-06-05",
+    "reason": "大跌調節",
+    "cooldown_days": 30
+  },
+  "2382": {
+    "sold_date": "2026-06-05",
+    "reason": "停損 383 觸發、落袋 +25% 大贏家",
+    "cooldown_days": 30
+  },
+  "2383": {
+    "sold_date": "2026-06-05",
+    "reason": "停損 4906 觸發、認賠 -9.82%",
+    "cooldown_days": 30
+  },
+  "2409": {
+    "sold_date": "2026-06-05",
+    "reason": "大跌調節 + 系統反指標",
+    "cooldown_days": 30
+  },
+  "4989": {
+    "sold_date": "2026-06-05",
+    "reason": "停損 93 觸發、認賠 -9%",
+    "cooldown_days": 30
+  },
+  "2301": {
+    "sold_date": "2026-06-08",
+    "reason": "週一大跌防禦砍倉",
+    "cooldown_days": 30
+  },
+  "2481": {
+    "sold_date": "2026-06-08",
+    "reason": "週一大跌防禦砍倉，落袋",
+    "cooldown_days": 30
+  },
+  "8016": {
+    "sold_date": "2026-06-08",
+    "reason": "停損 293 觸發",
+    "cooldown_days": 30
+  },
+  "3711": {
+    "sold_date": "2026-06-08",
+    "reason": "停損 580 觸發",
+    "cooldown_days": 30
+  },
+  "3017": {
+    "sold_date": "2026-06-08",
+    "reason": "週一大跌防禦砍倉，落袋",
+    "cooldown_days": 30
+  },
+  "8182": {
+    "sold_date": "2026-06-08",
+    "reason": "週一大跌防禦砍倉，落袋",
+    "cooldown_days": 30
+  },
+  "3028": {
+    "sold_date": "2026-06-08",
+    "reason": "停損 78 觸發",
+    "cooldown_days": 30
+  },
+  "3042": {
+    "sold_date": "2026-06-08",
+    "reason": "週一大跌防禦砍倉，落袋大贏家",
+    "cooldown_days": 30
+  },
+  "6285": {
+    "sold_date": "2026-06-08",
+    "reason": "週一大跌防禦砍倉，落袋大贏家",
+    "cooldown_days": 30
+  },
+  "8028": {
+    "sold_date": "2026-06-09",
+    "reason": "跌破停損 307，6/9 反彈 ~313 智能砍",
+    "cooldown_days": 30
+  },
+  "2455": {
+    "sold_date": "2026-06-12",
+    "reason": "跌停封死兩日後打開，砍倉",
+    "cooldown_days": 30
+  },
+  "3037": {
+    "sold_date": "2026-06-12",
+    "reason": "反彈中減碼，落袋",
+    "cooldown_days": 30
+  },
+  "00632R_2": {
+    "sold_date": "2026-06-16",
+    "reason": "大盤反彈確認、避險完成、認損出場",
+    "cooldown_days": 14,
+    "note": "code 00632R 反 1（二度賣出）"
+  },
+  "6443": {
+    "sold_date": "2026-06-17",
+    "reason": "代號錯買事件後處理出場",
+    "cooldown_days": 30
+  },
+  "2327": {
+    "sold_date": "2026-06-22",
+    "reason": "1050 全砍，落袋 +47K，比減半 -8K 計畫好",
+    "cooldown_days": 30
+  },
+  "3149_2": {
+    "sold_date": "2026-06-24",
+    "reason": "減半後再砍完，正達 2000 股累計 +30K+ 落袋",
+    "cooldown_days": 14,
+    "note": "code 3149 二度全清"
+  },
+  "3481": {
+    "sold_date": "2026-06-25",
+    "reason": "法人連 9 日賣 -12 萬張，紀律砍倉 69.8 落袋 +3.4K",
+    "cooldown_days": 30
+  }
+}

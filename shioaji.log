@@ -1,0 +1,1 @@
+[E 2026-07-01 00:47:22,362 C:\Users\zoobo\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\shioaji\utils.py:49:raise_resp_error] {'status': {'status_code': 400}, 'response': {'detail': 'Kbars date range must not exceed 30 days.'}}
