@@ -1,5 +1,5 @@
 # ================================================================
-# 真正機密 — 絕不上 GitHub
+# 真正機密 — 絕不上 GitHub（不管 Public/Private）
 # ================================================================
 telegram_config.json
 shioaji_config.json
@@ -7,7 +7,16 @@ shioaji_config.json
 shioaji_keys.txt
 data/cash.json
 
+# ================================================================
+# 個人隱私（改 Public 後也不上）
+# ================================================================
+data/trade_journal.md       # 個人交易反省日記
+data/journal_pending.json   # 待填 journal 清單
+data/morning_briefing.html  # 個人晨間摘要
+
+# ================================================================
 # 開發/測試檔（會有硬編碼密碼）
+# ================================================================
 _init_journal.py
 _backfill_recs.py
 _remind_2327.py
@@ -41,17 +50,16 @@ Thumbs.db
 *.log
 data/intraday_alert.log
 
-# 註：以下資料檔「保留」到 GitHub（cloud runs 需要 state）
+# ================================================================
+# 註：以下檔案「保留」到 GitHub（cloud runs 需要 state）
+# 這些不算敏感（只有股票代號）:
+# - portfolio.csv (持倉代號)
+# - cooldown.json (冷卻清單)
 # - data/notifications.jsonl (通知歷史)
-# - data/taiex_ma_state.json (MA 追蹤 state)
-# - data/recs_history.jsonl (推薦 snapshot 歷史)
+# - data/taiex_ma_state.json (MA state)
+# - data/recs_history.jsonl (推薦 snapshot)
 # - data/watchlist.json (觀察名單)
-# - data/journal_pending.json (Journal 待填清單)
-# - data/portfolio_snapshot.json (Portfolio snapshot)
-# - data/trailing_state.json (Trailing stop state)
+# - data/portfolio_snapshot.json (portfolio state)
+# - data/trailing_state.json (trailing stop state)
 # - data/scoreboard.png (TXF 記分板圖)
-# - portfolio.csv (持倉，公開)
-# - cooldown.json (冷卻名單)
-#
-# 為什麼？雲端排程要「讀」上次狀態，寫「新」狀態 → 必須存 GitHub
-# 你的 repo 是 Private，只有你能看
+# ================================================================
