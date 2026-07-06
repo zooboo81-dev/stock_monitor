@@ -947,7 +947,71 @@ elif _cash_pct >= 15:
 else:
     _stance_emo, _stance_label, _stance_color = "🔴", "全壓", "#d62728"
 
-with st.expander(f"🏆 總資產 {_total_assets:,.0f}　｜　{_stance_emo} {_stance_label}（現金 {_cash_pct:.0f}%）— 點開詳細", expanded=False):
+# ═══════════════ 🎯 今日決策快照（Action Bar）═══════════════
+# 7/07 升級：一屏濃縮 = 資產 + 決策紅綠燈 + 需處理數
+# 決策燈號 — 綜合 TXF + TAIEX MA
+_decision_emo = "⏸️"
+_decision_txt = "等訊號"
+_decision_color = "#666"
+_decision_bg = "#f5f5f5"
+if _txf and _txf.get("verdict") == "【做多訊號】":
+    _decision_emo = "🟢"
+    _decision_txt = "可進場做多"
+    _decision_color = "#1a5d2e"
+    _decision_bg = "#e6f4ea"
+elif _txf and _txf.get("verdict") == "【做空訊號】":
+    _decision_emo = "🔴"
+    _decision_txt = "不新進場（做空訊號）"
+    _decision_color = "#b71c1c"
+    _decision_bg = "#fde7e9"
+elif _ma_state and "抄底反彈確認" in _ma_state.get("level", ""):
+    _decision_emo = "🟢"
+    _decision_txt = "可進場（TAIEX 反彈確認）"
+    _decision_color = "#1a5d2e"
+    _decision_bg = "#e6f4ea"
+elif _ma_state and ("🔴" in _ma_state.get("level", "") or "跌破" in _ma_state.get("level", "")):
+    _decision_emo = "🔴"
+    _decision_txt = "避免進場（大盤空頭）"
+    _decision_color = "#b71c1c"
+    _decision_bg = "#fde7e9"
+else:
+    _decision_emo = "⏸️"
+    _decision_txt = "等訊號（大盤未給進場號誌）"
+
+# 損益 delta
+_pnl_delta_str = f"{total_pnl:+,.0f} ({total_pct:+.2f}%)"
+_pnl_color = "#d62728" if total_pnl >= 0 else "#2ca02c"
+
+st.markdown(
+    f"""
+<div style='background:linear-gradient(135deg, #fafafa, #fff); border:2px solid #ddd;
+            border-radius:12px; padding:14px 18px; margin:10px 0; color:#1a1a1a;'>
+  <div style='display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px'>
+    <div>
+      <div style='color:#666; font-size:11px'>💼 總資產</div>
+      <div style='font-size:26px; font-weight:800; color:#111'>{_total_assets:,.0f}</div>
+      <div style='color:{_pnl_color}; font-size:13px; font-weight:600'>{_pnl_delta_str} 未實現損益</div>
+    </div>
+    <div style='text-align:right'>
+      <div style='color:#666; font-size:11px'>{_stance_emo} {_stance_label}</div>
+      <div style='font-size:13px; color:#444; margin-top:4px'>
+        現金 <b>{_cash_pct:.0f}%</b> ｜ 持股 <b>{_stock_pct:.0f}%</b>
+      </div>
+    </div>
+  </div>
+  <div style='background:{_decision_bg}; border:1px solid {_decision_color}; border-radius:6px;
+              padding:8px 12px; margin-top:8px; text-align:center'>
+    <span style='color:#666; font-size:11px'>🎯 今日決策</span>
+    <span style='font-size:16px; font-weight:800; color:{_decision_color}; margin:0 8px'>
+      {_decision_emo} {_decision_txt}
+    </span>
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+with st.expander("💰 資產明細 — 點開查看", expanded=False):
     _a1, _a2, _a3, _a4 = st.columns(4)
     _a1.metric("🏆 總資產", f"{_total_assets:,.0f}")
     _a2.metric("💵 現金", f"{_cash:,.0f}", f"{_cash_pct:.1f}%")
@@ -1297,7 +1361,66 @@ if not top_picks_data:
                 "3. 桌機打開網頁不受影響（本機能抓 TWSE）"
             )
         else:
-            st.info(f"暫無推薦標的（法人資料 {_instit_n} 檔已抓到，但無符合條件者）")
+            # 7/07 升級：空榜 = 明確結論，不是錯誤
+            st.markdown(
+                """
+                <div style='background:#e8f5e9; border:2px solid #2ca02c; border-radius:8px;
+                            padding:16px; margin:8px 0; color:#1a1a1a; text-align:center'>
+                  <div style='font-size:20px; font-weight:700; color:#1a5d2e; margin-bottom:8px'>
+                    🈳 系統今日未新增推薦
+                  </div>
+                  <div style='font-size:13px; color:#555; margin-bottom:12px'>
+                    ✅ <b>這是預期行為</b>，代表沒有 score≥4 的黑馬<br>
+                    或大盤閘門擋著（TXF/TAIEX 未給進場訊號）
+                  </div>
+                  <div style='background:white; border-radius:6px; padding:10px; text-align:left; font-size:13px'>
+                    <b style='color:#1a5d2e'>👉 今日建議動作</b><br>
+                    • 💰 專心看持倉風控（下方持倉表）<br>
+                    • 👀 檢查觀察名單追蹤中的股票<br>
+                    • 📊 大盤 <b>不動 = 最好的動作</b>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            # 顯示昨日推薦追蹤（給用戶看到過去表現）
+            try:
+                import json as _yj
+                from pathlib import Path as _yp
+                from datetime import date as _yd, timedelta as _ytd
+                _hist_f = _yp("data/recs_history.jsonl")
+                if _hist_f.exists():
+                    _y_target = None
+                    for _off in range(1, 8):
+                        _y_target = (_yd.today() - _ytd(days=_off)).isoformat()
+                        _y_recs = []
+                        for _line in _hist_f.read_text(encoding="utf-8").splitlines():
+                            _line = _line.strip()
+                            if not _line: continue
+                            try:
+                                _r = _yj.loads(_line)
+                                if _r.get("snapshot_date") == _y_target:
+                                    _y_recs.append(_r)
+                            except: pass
+                        if _y_recs:
+                            break
+                    if _y_recs:
+                        with st.expander(f"📊 上一次推薦（{_y_target}，{len(_y_recs)} 檔）— 表現追蹤", expanded=False):
+                            for _r in _y_recs[:5]:
+                                _t = _r.get("t5_return_pct") or _r.get("t1_return_pct")
+                                _t_str = f"{_t:+.2f}%" if _t is not None else "追蹤中"
+                                _t_color = "#d62728" if (_t or 0) > 0 else ("#2ca02c" if (_t or 0) < 0 else "#666")
+                                _strat_lbl = _r.get("strategy_label", "")
+                                st.markdown(
+                                    f"<div style='padding:6px 10px; margin:3px 0; background:#f9f9f9; border-radius:4px; font-size:12px'>"
+                                    f"<b>{_r['code']} {_r.get('name','')}</b> "
+                                    f"score {_r.get('score',0):+d} {_strat_lbl} → "
+                                    f"<span style='color:{_t_color}; font-weight:700'>{_t_str}</span>"
+                                    f"</div>",
+                                    unsafe_allow_html=True,
+                                )
+            except Exception:
+                pass
 else:
     # 進場決策評估函式（6/23 升級：直接給 GO/STOP 燈號 + 進場 SOP）
     # 讀 TXF 訊號（6/24 升級：偏多禁令 — Level 1 保守紀律派）
@@ -1585,10 +1708,15 @@ else:
 # ════════════════════════════════════════════════════════════
 # 📅 行事曆 + 板塊熱度（3 tabs）
 # ════════════════════════════════════════════════════════════
-st.subheader("📅 行事曆 + 板塊 + 飆股")
-tab_events, tab_earnings, tab_sectors, tab_hot, tab_recs, tab_watch = st.tabs(
-    ["⏰ 經濟事件", "📊 個股財報日", "🌡️ 板塊熱度", "🚀 飆股觀察", "📈 推薦表現追蹤", "👀 觀察名單"]
-)
+st.subheader("📁 深入資訊")
+st.caption("💡 手機優化：改用摺疊區塊，點展開才載入內容")
+# 7/07 升級：Tabs → Expanders（手機 UX 大改善）
+tab_events = st.expander("⏰ 經濟事件（FOMC / CPI / 財報等對你部位有影響的日期）", expanded=False)
+tab_earnings = st.expander("📊 個股財報日（未來 30 天）", expanded=False)
+tab_sectors = st.expander("🌡️ 板塊熱度（今日 8 大類股表現）", expanded=False)
+tab_hot = st.expander("🚀 飆股觀察（3 日內 +20% 以上）", expanded=False)
+tab_recs = st.expander("📈 推薦表現追蹤（近 30 天推薦的實際報酬）", expanded=False)
+tab_watch = st.expander("👀 觀察名單（你自訂追蹤的股票）", expanded=False)
 
 # 預先抓事件，緊急訊號區會用到
 upcoming = upcoming_events(30)
