@@ -339,9 +339,9 @@ def fetch_top_picks_cached(portfolio_codes_tuple: tuple, _instit_by_code: dict) 
         return (_dt.datetime.utcnow() + _dt.timedelta(hours=8)).strftime("%H:%M:%S")
 
     # ★ 7/06 修：雲端偵測 — 雲端跳過即時計算（會卡住轉圈）
-    # Streamlit Cloud 環境變數：HOSTNAME 含 'streamlit'
-    _is_cloud = os.environ.get("HOSTNAME", "").startswith("streamlit") or \
-                os.environ.get("STREAMLIT_SERVER_HEADLESS") == "true"
+    # 用 OS 判斷最可靠：桌機=Windows、Streamlit Cloud=Linux
+    import platform as _pf
+    _is_cloud = _pf.system() != "Windows"
     if _is_cloud:
         return [], _taiwan_now_str()  # 雲端直接回空，避免卡死
 

@@ -32,5 +32,6 @@ jobs:
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add data/notifications.jsonl data/morning_briefing.html
+          # 只 commit notifications.jsonl，morning_briefing.html 在 .gitignore（桌機才用）
+          git add data/notifications.jsonl
           git diff --staged --quiet && echo "無變動" || (git commit -m "chore: morning briefing" && git push)
