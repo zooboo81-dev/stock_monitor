@@ -525,16 +525,23 @@ if c_btn.button("🔄 立即刷新"):
 def _load_notifications():
     from pathlib import Path as _P
     import json as _json
+    from datetime import datetime as _dtn, timedelta as _tdn
     nf = _P("data/notifications.jsonl")
     if not nf.exists():
         return []
+    # 7/07 升級：支援未來排程通知，只顯示 ts <= 台灣時間現在
+    _tw_now = (_dtn.utcnow() + _tdn(hours=8)).isoformat(timespec="seconds")
     out = []
     for line in nf.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            out.append(_json.loads(line))
+            rec = _json.loads(line)
+            # 未來排程通知（ts > 現在）先隱藏，時間到才顯示
+            if rec.get("ts", "") > _tw_now:
+                continue
+            out.append(rec)
         except Exception:
             continue
     return sorted(out, key=lambda x: x.get("ts", ""), reverse=True)
