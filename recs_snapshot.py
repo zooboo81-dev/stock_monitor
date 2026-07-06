@@ -140,6 +140,10 @@ def snapshot_today(top_n: int = 10) -> list[dict]:
             "backtest_wr": round(p.get("backtest_wr", 0.0), 3),
             "backtest_n": p.get("backtest_n", 0),
             "entry_price": round(p.get("price", 0.0), 2),
+            "atr14": round(p["atr14"], 3) if p.get("atr14") else None,
+            "strategy_type": (p.get("strategy") or {}).get("type"),   # 優化 C
+            "strategy_label": (p.get("strategy") or {}).get("label"),
+            "dim_scores": p.get("dim_scores"),   # 優化 B
             "t1_price": None, "t1_return_pct": None,
             "t5_price": None, "t5_return_pct": None,
             "t10_price": None, "t10_return_pct": None,

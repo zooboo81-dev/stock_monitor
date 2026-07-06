@@ -12,6 +12,7 @@ try:
 except ImportError:
     pass
 
+import os
 import urllib.parse
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -285,6 +286,12 @@ def fetch_top_picks_cached(portfolio_codes_tuple: tuple, _instit_by_code: dict) 
                         "backtest_ev": r.get("backtest_ev", 0),
                         "backtest_n": r.get("backtest_n", 0),
                         "backtest_wr": r.get("backtest_wr", 0),
+                        "atr14": r.get("atr14"),  # 7/06 新增
+                        "dim_scores": r.get("dim_scores"),   # 優化 B
+                        "strategy": {                        # 優化 C
+                            "type": r.get("strategy_type"),
+                            "label": r.get("strategy_label"),
+                        } if r.get("strategy_type") else None,
                     })
             if today_picks:
                 # 排序：評分 → 勝率 → EV
@@ -327,6 +334,17 @@ def fetch_top_picks_cached(portfolio_codes_tuple: tuple, _instit_by_code: dict) 
             pass
 
     # 2) Fallback：即時跑 discover（首次或檔案沒今天資料）
+    def _taiwan_now_str():
+        # 雲端 server 是 UTC，需要 +8 轉台灣時間
+        return (_dt.datetime.utcnow() + _dt.timedelta(hours=8)).strftime("%H:%M:%S")
+
+    # ★ 7/06 修：雲端偵測 — 雲端跳過即時計算（會卡住轉圈）
+    # Streamlit Cloud 環境變數：HOSTNAME 含 'streamlit'
+    _is_cloud = os.environ.get("HOSTNAME", "").startswith("streamlit") or \
+                os.environ.get("STREAMLIT_SERVER_HEADLESS") == "true"
+    if _is_cloud:
+        return [], _taiwan_now_str()  # 雲端直接回空，避免卡死
+
     try:
         picks = top_picks(
             set(portfolio_codes_tuple),
@@ -334,10 +352,10 @@ def fetch_top_picks_cached(portfolio_codes_tuple: tuple, _instit_by_code: dict) 
             twse_session(),
             top_n=5,
         )
-        return picks, _dt.datetime.now().strftime("%H:%M:%S")
+        return picks, _taiwan_now_str()
     except Exception as e:
         st.warning(f"推薦標的計算失敗：{e}")
-        return [], _dt.datetime.now().strftime("%H:%M:%S")
+        return [], _taiwan_now_str()
 
 
 @st.cache_data(ttl=1800)
@@ -694,6 +712,8 @@ def _read_taiex_ma_state():
 
 _ma_state = _read_taiex_ma_state()
 if _ma_state:
+    # 雲端無 TXF 時，TAIEX MA 就是進場閘門
+    _ma_gate_hint = "" if _txf else " ｜ <b style='color:#1976d2'>此為進場閘門（雲端無 TXF）</b>"
     st.markdown(
         f"<div style='background:{_ma_state['bg']}; border-left:6px solid {_ma_state['color']}; "
         f"padding:8px 14px; border-radius:6px; margin:8px 0; color:#1a1a1a; font-size:12px;'>"
@@ -702,7 +722,7 @@ if _ma_state:
         f"<span style='color:#444'>{_ma_state['label']} ｜ "
         f"距 20MA <b>{_ma_state['dist_ma20_pct']:+.2f}%</b> ｜ "
         f"60MA <b>{_ma_state['dist_ma60_pct']:+.2f}%</b> ｜ "
-        f"200MA <b>{_ma_state['dist_ma200_pct']:+.2f}%</b></span><br>"
+        f"200MA <b>{_ma_state['dist_ma200_pct']:+.2f}%</b>{_ma_gate_hint}</span><br>"
         f"<span style='color:#555; font-style:italic'>{_ma_state['action']}</span>"
         f"</div>",
         unsafe_allow_html=True,
@@ -1238,6 +1258,12 @@ else:
     top_picks_data, _calc_time = fetch_top_picks_cached(
         tuple(sorted(portfolio_codes_set)), instit_by_code
     )
+    # 7/06 升級：score>=4 才推薦（回測資料顯示 score 3 勝率不夠）
+    _pre_filter_n = len(top_picks_data)
+    top_picks_data = [p for p in top_picks_data if p.get("score", 0) >= 4]
+    _filtered_n = _pre_filter_n - len(top_picks_data)
+    if _filtered_n > 0:
+        st.caption(f"🎯 已過濾 {_filtered_n} 檔 score<4（保守派：只推薦最強）")
     # 警戒期只取前 3（降低不確定性高時的選擇困難）
     if market_regime["regime"] == "warning":
         top_picks_data = top_picks_data[:3]
@@ -1245,10 +1271,13 @@ else:
 
 if _calc_time:
     import datetime as _dt
-    _now = _dt.datetime.now()
+    # 雲端 server UTC → 台灣 UTC+8
+    _now = _dt.datetime.utcnow() + _dt.timedelta(hours=8)
     try:
+        # 若 _calc_time 帶「（即時報價）」等後綴，先切出時間
+        _calc_hms = _calc_time.split("（")[0].strip() if "（" in _calc_time else _calc_time
         _calc_dt = _dt.datetime.combine(_now.date(),
-                                         _dt.datetime.strptime(_calc_time, "%H:%M:%S").time())
+                                         _dt.datetime.strptime(_calc_hms, "%H:%M:%S").time())
         _mins = max(0, int((_now - _calc_dt).total_seconds() // 60))
         _fresh = "🟢" if _mins < 2 else ("🟡" if _mins < 5 else "🔴")
         st.caption(f"{_fresh} 評分計算於 **{_calc_time}**（{_mins} 分鐘前）— 超過 5 分按右上「強制重算」")
@@ -1257,14 +1286,45 @@ if _calc_time:
 
 if not top_picks_data:
     if market_regime["regime"] != "bear":
-        st.info("暫無推薦標的（可能盤後資料未更新，或符合條件者不足）")
+        # 診斷：法人資料是否有抓到
+        _instit_n = len(instit_by_code) if instit_by_code else 0
+        if _instit_n == 0:
+            st.warning(
+                "⚠️ 雲端抓不到 TWSE 法人資料（可能 IP 被限流）\n\n"
+                "**變通方案**：\n"
+                "1. 等每天 17:30 排程跑完後推薦會存進 recs_history.jsonl\n"
+                "2. 之後打開手機都會直接讀檔（不用即時抓）\n"
+                "3. 桌機打開網頁不受影響（本機能抓 TWSE）"
+            )
+        else:
+            st.info(f"暫無推薦標的（法人資料 {_instit_n} 檔已抓到，但無符合條件者）")
 else:
     # 進場決策評估函式（6/23 升級：直接給 GO/STOP 燈號 + 進場 SOP）
     # 讀 TXF 訊號（6/24 升級：偏多禁令 — Level 1 保守紀律派）
+    # 7/06 升級：雲端無 TXF 時 fallback 用 TAIEX MA 當閘門
     _txf_for_entry = _txf  # 從上方已讀的 _txf banner
     _txf_verdict_str = (_txf_for_entry or {}).get("verdict", "")
-    _is_buy_signal = _txf_verdict_str == "【做多訊號】"
-    _is_block_state = _txf_verdict_str in ("【偏多】", "【偏空】", "【觀望】", "【出場訊號】", "【做空訊號】")
+    _has_txf = bool(_txf_for_entry)
+
+    if _has_txf:
+        _is_buy_signal = _txf_verdict_str == "【做多訊號】"
+        _is_block_state = _txf_verdict_str in ("【偏多】", "【偏空】", "【觀望】", "【出場訊號】", "【做空訊號】")
+        _gate_wait_text = f"TXF {_txf_verdict_str.strip('【】')}，等做多訊號"
+    else:
+        # 雲端 fallback：用 TAIEX MA 當閘門（保守版）
+        # 只有📈抄底反彈確認才放行，其他一律擋 — 手機保守派
+        _ma_level = (_ma_state or {}).get("level", "")
+        _is_buy_signal = "抄底反彈確認" in _ma_level
+        _is_block_state = bool(_ma_level) and not _is_buy_signal
+        if not _ma_level:
+            # 連 TAIEX MA state 都沒有 → 更保守 → 擋
+            _is_block_state = True
+            _gate_wait_text = "雲端無 TXF 訊號，桌機確認後再進"
+        elif "正常" in _ma_level:
+            _gate_wait_text = "TAIEX ⚪正常但無反彈訊號，等 TXF 做多訊號"
+        else:
+            _ma_label_clean = _ma_level.strip("🔴🟡🟢⚪📈⚠️ ")
+            _gate_wait_text = f"大盤 {_ma_label_clean}，等訊號改善"
 
     # 6/30 升級：抄底反彈確認 → 解除偏多禁令（不必等 TXF）
     _rebound_signal = _ma_state and _ma_state.get("is_rebound_signal", False)
@@ -1307,7 +1367,7 @@ else:
             v_color = "#1976d2"
             v_bg = "#e3f2fd"
             v_emo = "🔵"
-            v_text = f"TXF {_txf_verdict_str.strip('【】')}，等做多訊號"
+            v_text = _gate_wait_text
         elif score >= 4 and -2 < chg < 5 and not bad_k:
             verdict = "GO"
             v_color = "#1a5d2e"
@@ -1332,13 +1392,36 @@ else:
             "good_k": good_k,
         }
 
-    def _entry_sop(price, score):
-        """產出簡易進場 SOP（限價、停損、停利、建議部位）"""
+    def _entry_sop(price, score, atr14=None):
+        """產出簡易進場 SOP（限價、停損、停利、建議部位）
+        7/06 升級：停損改用 ATR 動態計算（規格書優化 A）
+        """
         if not price:
             return None
         # 限價 = 現價 +0.3%（避免市價殺出）
         limit_buy = price * 1.003
-        stop_loss = price * 0.93   # -7%
+        # ★ ATR 動態停損（1.5 × ATR14）— 波動大股票停損放寬、波動小收緊
+        # 保底：ATR 算出的停損跌幅不能超過 -10%（避免爛股放太寬）
+        # 保底：ATR 算出的停損跌幅不能少於 -4%（避免熱股停太緊）
+        if atr14 and atr14 > 0:
+            atr_stop = price - 1.5 * atr14
+            atr_pct = (atr_stop - price) / price * 100  # 負值
+            if atr_pct < -10:
+                stop_loss = price * 0.90
+                stop_pct = -10.0
+                stop_method = "ATR 過寬 → 硬上限 -10%"
+            elif atr_pct > -4:
+                stop_loss = price * 0.96
+                stop_pct = -4.0
+                stop_method = "ATR 過緊 → 硬下限 -4%"
+            else:
+                stop_loss = atr_stop
+                stop_pct = atr_pct
+                stop_method = f"1.5×ATR ({atr14:.2f})"
+        else:
+            stop_loss = price * 0.93   # ATR 缺 → 舊 -7%
+            stop_pct = -7.0
+            stop_method = "固定 -7%（無 ATR）"
         take_profit = price * 1.11  # +11%
         # 部位建議（依股價分級）
         if price >= 1000:
@@ -1352,6 +1435,8 @@ else:
         return {
             "limit_buy": limit_buy,
             "stop_loss": stop_loss,
+            "stop_pct": stop_pct,
+            "stop_method": stop_method,
             "take_profit": take_profit,
             "pos_lots": pos_lots,
         }
@@ -1380,7 +1465,7 @@ else:
 
             # 進場決策
             ev_ = _entry_verdict(p)
-            sop = _entry_sop(p.get("price", 0), score)
+            sop = _entry_sop(p.get("price", 0), score, p.get("atr14"))
 
             warnings_html = ""
             if ev_["warnings"]:
@@ -1398,7 +1483,7 @@ else:
             padding:6px 8px; margin-top:6px; font-size:11px; color:#1a1a1a;'>
   <div style='font-weight:700; color:#1a5d2e; margin-bottom:3px'>📋 進場建議</div>
   <div>限價買 <b>{sop['limit_buy']:.2f}</b>　部位 {sop['pos_lots']}</div>
-  <div style='color:#d62728'>停損 <b>{sop['stop_loss']:.2f}</b>（-7%）</div>
+  <div style='color:#d62728'>停損 <b>{sop['stop_loss']:.2f}</b>（{sop['stop_pct']:+.1f}%，{sop['stop_method']}）</div>
   <div style='color:#2ca02c'>停利 <b>{sop['take_profit']:.2f}</b>（+11% trail）</div>
 </div>
 """
@@ -1411,6 +1496,54 @@ else:
 </div>
 """
 
+            # 7/06 優化 C：策略標籤
+            strategy_html = ""
+            _strat = p.get("strategy")
+            if _strat and _strat.get("label"):
+                _conf = _strat.get("confidence", 0)
+                _strat_bg = "#e3f2fd" if _conf >= 80 else "#f5f5f5"
+                _strat_bd = "#1976d2" if _conf >= 80 else "#999"
+                strategy_html = (
+                    f"<div style='background:{_strat_bg}; border:1px solid {_strat_bd}; "
+                    f"border-radius:3px; padding:3px 6px; margin-top:4px; "
+                    f"font-size:11px; color:#1a1a1a; text-align:center; font-weight:600'>"
+                    f"{_strat['label']} <span style='color:#666; font-weight:400'>"
+                    f"({_conf}% 信心)</span></div>"
+                )
+
+            # 7/06 優化 B：5 維度分數條
+            dim_html = ""
+            _dims = p.get("dim_scores")
+            if _dims:
+                _dim_labels = [
+                    ("trend", "趨勢", "#1976d2"),
+                    ("momentum", "動能", "#e65100"),
+                    ("volume", "量能", "#7b1fa2"),
+                    ("chip", "籌碼", "#2e7d32"),
+                    ("risk", "風險", "#c62828"),
+                ]
+                _bars = ""
+                for key, label, color in _dim_labels:
+                    v = _dims.get(key, 50)
+                    _bars += (
+                        f"<div style='display:flex; align-items:center; font-size:10px; "
+                        f"margin-bottom:2px; color:#333'>"
+                        f"<span style='width:32px'>{label}</span>"
+                        f"<div style='flex:1; background:#eee; height:8px; border-radius:2px; "
+                        f"margin-right:4px; overflow:hidden'>"
+                        f"<div style='background:{color}; width:{v}%; height:100%'></div>"
+                        f"</div>"
+                        f"<span style='width:22px; text-align:right; font-weight:600'>{v}</span>"
+                        f"</div>"
+                    )
+                dim_html = (
+                    f"<div style='background:#fafafa; padding:5px 6px; margin-top:4px; "
+                    f"border-radius:3px; border:1px solid #e0e0e0'>"
+                    f"<div style='font-size:10px; color:#666; margin-bottom:3px; font-weight:600'>"
+                    f"📊 5 維度分數（加權總分 <b>{_dims.get('total_weighted', 50)}</b>/100）</div>"
+                    f"{_bars}</div>"
+                )
+
             card_html = f"""
 <div style='background:#fff8e1; border:2px solid #f9a825; border-radius:8px;
             padding:12px; margin-bottom:8px; height:100%; color:#1a1a1a;'>
@@ -1422,6 +1555,7 @@ else:
     </span>
   </div>
   <div style='color:#666; font-size:11px; margin-top:2px'>{p['code']}</div>
+  {strategy_html}
   <div style='font-size:13px; margin-top:6px; color:#333'>
     {p['verdict_emoji']} {p['verdict']}
   </div>
@@ -1432,6 +1566,7 @@ else:
   {verdict_html}
   {warnings_html}
   {sop_html}
+  {dim_html}
   <div style='font-size:11px; color:#555; margin-top:4px'>{instit_str}</div>
   <div style='font-size:11px; margin-top:3px; padding:3px 6px; border-radius:3px;
               background:{ '#e6f4ea' if (p.get('backtest_ev') or 0) > 1 else '#fff8e1' };

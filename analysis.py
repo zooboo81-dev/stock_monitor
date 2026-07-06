@@ -259,6 +259,11 @@ def smart_money_score(hist: pd.DataFrame, instit: dict | None = None) -> dict:
         attention_level = max(attention_level, 1)
         attention_reasons.append(f"法人連 {abs(instit['consecutive_days'])} 日同向")
 
+    # ★ 7/06 優化 B：把 breakdown 拆成 5 維度分數
+    dim_scores = _score_by_dimension(breakdown)
+    # ★ 7/06 優化 C：辨識策略類型
+    strategy = _classify_strategy(h, breakdown, instit)
+
     return {
         "score": score,
         "verdict": verdict,
@@ -268,6 +273,8 @@ def smart_money_score(hist: pd.DataFrame, instit: dict | None = None) -> dict:
         "attention_reasons": attention_reasons,
         "bullish_cnt": bullish_cnt,
         "bearish_cnt": bearish_cnt,
+        "dim_scores": dim_scores,      # 7/06 新增
+        "strategy": strategy,          # 7/06 新增
         "indicators": {
             "macd_dif": float(dif.iloc[-1]) if len(dif) else None,
             "macd_dem": float(dem.iloc[-1]) if len(dem) else None,
@@ -276,3 +283,110 @@ def smart_money_score(hist: pd.DataFrame, instit: dict | None = None) -> dict:
             "d": float(d.iloc[-1]) if len(d) else None,
         },
     }
+
+
+# ────────────────────────────────────────────
+# 7/06 優化 B：5 維度分數拆解
+# ────────────────────────────────────────────
+def _score_by_dimension(breakdown: list[tuple[str, int, str]]) -> dict:
+    """把 breakdown 依規格書 5 維度分類 + 加權
+    輸出：{trend, momentum, volume, chip, risk} 每維 0-100 分
+    加權：趨勢30% + 動能20% + 量能20% + 籌碼15% + 風險15%
+    """
+    # 分類對照
+    dim_map = {
+        "均線":    "trend",
+        "MACD":   "momentum",
+        "KD":     "momentum",
+        "K線":    "momentum",
+        "量價":    "volume",
+        "法人":    "chip",
+        "乖離":    "risk",
+    }
+    raw = {"trend": 0, "momentum": 0, "volume": 0, "chip": 0, "risk": 0}
+    max_possible = {"trend": 2, "momentum": 6, "volume": 2, "chip": 3, "risk": 1}  # 各維最大絕對值
+    for cat, pts, _ in breakdown:
+        dim = dim_map.get(cat)
+        if not dim:
+            continue
+        raw[dim] += pts
+
+    # 標準化到 0-100（50 = 中性）
+    norm = {}
+    for dim, val in raw.items():
+        max_p = max_possible[dim]
+        # -max ~ +max → 0 ~ 100
+        pct = 50 + (val / max_p * 50) if max_p else 50
+        norm[dim] = max(0, min(100, round(pct)))
+
+    # 加權總分（0-100）
+    weights = {"trend": 0.30, "momentum": 0.20, "volume": 0.20, "chip": 0.15, "risk": 0.15}
+    total = sum(norm[d] * w for d, w in weights.items())
+
+    return {
+        **norm,
+        "total_weighted": round(total, 1),
+    }
+
+
+# ────────────────────────────────────────────
+# 7/06 優化 C：策略分類
+# ────────────────────────────────────────────
+def _classify_strategy(hist: pd.DataFrame, breakdown: list, instit: dict | None) -> dict:
+    """依 breakdown + K 線資料辨識策略類型
+    3 種：突破 / 回檔 / 量價共振 / 其他
+    """
+    if hist is None or hist.empty or len(hist) < 20:
+        return {"type": "unknown", "label": "資料不足", "confidence": 0}
+
+    close = hist["Close"]
+    last = float(close.iloc[-1])
+    prev = float(close.iloc[-2]) if len(close) >= 2 else last
+    chg_pct = (last - prev) / prev * 100 if prev else 0
+
+    # 20 日高點
+    high_20d = float(close.tail(20).max())
+    is_breakout = last >= high_20d * 0.995  # 距 20 日高 < 0.5%
+
+    # MA20
+    ma20 = float(close.rolling(20).mean().iloc[-1])
+    dist_ma20 = (last - ma20) / ma20 * 100
+    is_near_ma20 = -2 <= dist_ma20 <= 3  # MA20 附近 -2%~+3%
+
+    # 找 breakdown 中的訊號
+    reasons = {cat for cat, _, _ in breakdown}
+    has_vol_spike_up = any(
+        cat == "量價" and pts > 0 for cat, pts, _ in breakdown
+    )
+    has_instit_buy = bool(instit and instit.get("consecutive_days", 0) >= 3)
+    has_ma_bull = any(
+        cat == "均線" and pts >= 2 for cat, pts, _ in breakdown
+    )
+
+    # 判斷（優先順序：量價共振 > 突破 > 回檔）
+    # 1) 量價共振：爆量長紅 + 法人買超
+    if has_vol_spike_up and has_instit_buy:
+        return {"type": "vol_price", "label": "🌊 量價共振", "confidence": 90,
+                "note": "爆量長紅 + 法人買超（主力吃貨型）"}
+
+    # 2) 20 日突破：突破 20 日高 + 爆量
+    if is_breakout and has_vol_spike_up:
+        return {"type": "breakout", "label": "🚀 20 日突破", "confidence": 85,
+                "note": "突破 20 日高點 + 爆量（大黑馬型）"}
+
+    if is_breakout:
+        return {"type": "breakout", "label": "🚀 20 日突破", "confidence": 60,
+                "note": "接近/突破 20 日高（量能待確認）"}
+
+    # 3) MA20 回檔反彈：站上 MA20 + 均線多頭
+    if is_near_ma20 and has_ma_bull and chg_pct > 0:
+        return {"type": "pullback", "label": "🎯 MA20 回檔反彈", "confidence": 80,
+                "note": "回檔至 MA20 反彈（保守派）"}
+
+    if is_near_ma20 and dist_ma20 >= 0:
+        return {"type": "pullback", "label": "🎯 MA20 回檔反彈", "confidence": 55,
+                "note": "在 MA20 附近整理"}
+
+    # 4) 都不符合
+    return {"type": "other", "label": "🔵 綜合訊號", "confidence": 40,
+            "note": "無明確策略類型"}

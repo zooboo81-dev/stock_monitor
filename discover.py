@@ -306,6 +306,25 @@ def top_picks(
                 if edge_ev < 2.0 or wr_pct < 50:
                     continue
 
+            # ★ ATR14 動態停損（7/06 升級：規格書優化 A）
+            # ATR = True Range 14 日平均，用來算個股波動幅度
+            atr14 = None
+            if len(hist) >= 15 and all(col in hist.columns for col in ("High", "Low", "Close")):
+                try:
+                    high = hist["High"]
+                    low = hist["Low"]
+                    close_shift = hist["Close"].shift(1)
+                    tr = pd.concat([
+                        high - low,
+                        (high - close_shift).abs(),
+                        (low - close_shift).abs(),
+                    ], axis=1).max(axis=1)
+                    atr_val = float(tr.tail(14).mean())
+                    if atr_val > 0:
+                        atr14 = atr_val
+                except Exception:
+                    pass
+
             top_reasons = sorted(score_data["breakdown"], key=lambda x: -x[1])[:3]
             results.append({
                 "code": code,
@@ -323,6 +342,9 @@ def top_picks(
                 "backtest_ev": edge_ev,
                 "backtest_n": edge_n,
                 "backtest_wr": edge_wr,
+                "atr14": atr14,
+                "dim_scores": score_data.get("dim_scores"),   # 7/06 優化 B
+                "strategy": score_data.get("strategy"),        # 7/06 優化 C
             })
         except Exception:
             continue

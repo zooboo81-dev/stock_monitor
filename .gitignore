@@ -9,10 +9,12 @@ data/cash.json
 
 # ================================================================
 # 個人隱私（改 Public 後也不上）
+# 注意：inline # 會被 gitignore 當成 pattern 一部分，一定要獨立行
 # ================================================================
-data/trade_journal.md       # 個人交易反省日記
-data/journal_pending.json   # 待填 journal 清單
-data/morning_briefing.html  # 個人晨間摘要
+data/trade_journal.md
+data/journal_pending.json
+data/morning_briefing.html
+.last_regime.json
 
 # ================================================================
 # 開發/測試檔（會有硬編碼密碼）
@@ -24,6 +26,10 @@ _remind_2327.vbs
 _remind_00631L.py
 _remind_00631L.vbs
 _diag_*.py
+_benchmark_recs.py
+_verify_bundle.py
+verify_bundle/
+data_export/
 
 # 桌機專用（雲端不需要）
 start_hidden.vbs

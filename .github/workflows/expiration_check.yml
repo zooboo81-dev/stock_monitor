@@ -1,0 +1,36 @@
+name: Holding Expiration Check (T+10)
+
+on:
+  schedule:
+    # 台灣 09:00 = UTC 01:00（週一至五，開盤前提醒）
+    - cron: '0 1 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run expiration check
+        run: python holding_expiration_check.py
+
+      - name: Commit
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/expiration_checks.json data/notifications.jsonl
+          git diff --staged --quiet && echo "無變動" || (git commit -m "chore: T+10 expiration check" && git push)
