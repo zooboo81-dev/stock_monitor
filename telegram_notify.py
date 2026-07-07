@@ -30,10 +30,11 @@ def _guess_priority(title: str, body: str) -> int:
         return 1
     if "T+10" in title or "到期" in title:
         return 1
-    # 🟢 Low：出場成功 / 每日摘要 / 待辦
-    if any(k in title for k in ("✅", "🎉", "紀律派勝", "待辦", "📌", "📊 推薦榜", "🌅", "☀️")):
+    # 🟢 Low：出場成功 / 待辦（不打擾）
+    if any(k in title for k in ("✅", "🎉", "紀律派勝", "待辦", "📌")):
         return -1
-    # 🟡 Normal：預設
+    # 🌅 Normal：晨間摘要、推薦榜、觀察名單（有聲有震）
+    # 預設也是 Normal
     return 0
 
 
