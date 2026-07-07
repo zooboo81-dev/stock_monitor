@@ -75,3 +75,4 @@ watchdog.log
 data/trades/*
 !data/trades/.gitkeep
 data/trade_records.jsonl
+pushover_config.json
