@@ -55,6 +55,7 @@ Thumbs.db
 # Logs
 *.log
 data/intraday_alert.log
+watchdog.log
 
 # ================================================================
 # 註：以下檔案「保留」到 GitHub（cloud runs 需要 state）
