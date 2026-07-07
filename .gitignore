@@ -70,3 +70,8 @@ watchdog.log
 # - data/trailing_state.json (trailing stop state)
 # - data/scoreboard.png (TXF 記分板圖)
 # ================================================================
+
+# 交易截圖（個人隱私）
+data/trades/*
+!data/trades/.gitkeep
+data/trade_records.jsonl

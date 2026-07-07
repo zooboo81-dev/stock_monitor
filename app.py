@@ -1724,6 +1724,113 @@ tab_sectors = st.expander("🌡️ 板塊熱度（今日 8 大類股表現）", 
 tab_hot = st.expander("🚀 飆股觀察（3 日內 +20% 以上）", expanded=False)
 tab_recs = st.expander("📈 推薦表現追蹤（近 30 天推薦的實際報酬）", expanded=False)
 tab_watch = st.expander("👀 觀察名單（你自訂追蹤的股票）", expanded=False)
+tab_trades = st.expander("📸 交易截圖記錄（手機隨拍隨傳）", expanded=False)
+
+# ════════════════════════════════════════════════════════════
+# 📸 交易截圖上傳（7/07 新增）
+# ════════════════════════════════════════════════════════════
+with tab_trades:
+    import platform as _pf_ts
+    _is_cloud_ts = _pf_ts.system() != "Windows"
+
+    st.caption(
+        "💡 **推薦流程**：券商 App 下單 → 截圖 → 這裡上傳並填代號 → 送出<br>"
+        f"⚠️ {'**雲端版**：截圖只在此 session 顯示，重跑會消失（要永久存請用 Tailscale 桌機版）' if _is_cloud_ts else '**桌機版**：截圖永久存 `data/trades/` 資料夾'}",
+        unsafe_allow_html=True,
+    )
+
+    _trades_dir = Path("data/trades")
+    _trades_dir.mkdir(exist_ok=True)
+    _trade_records_f = Path("data/trade_records.jsonl")
+
+    # ── 上傳表單 ──
+    with st.form(key="trade_upload_form", clear_on_submit=True):
+        _tu_col1, _tu_col2 = st.columns([2, 1])
+        _t_code = _tu_col1.text_input("股票代號", placeholder="例如 2337")
+        _t_action = _tu_col2.selectbox("動作", ["買", "賣", "加碼", "減碼"])
+        _tu_col3, _tu_col4 = st.columns(2)
+        _t_shares = _tu_col3.number_input("股數", min_value=0, step=1000, value=0)
+        _t_price = _tu_col4.number_input("成交價", min_value=0.0, step=0.05, format="%.2f", value=0.0)
+        _t_note = st.text_area("備註（進場理由 / 出場原因 / 心情）", height=68, placeholder="例：跌破停損砍倉、跟推薦榜進場…")
+        _t_image = st.file_uploader("📸 截圖檔案", type=["png", "jpg", "jpeg"], accept_multiple_files=False)
+        _t_submit = st.form_submit_button("💾 儲存交易記錄", type="primary", use_container_width=True)
+
+    if _t_submit:
+        if not _t_code:
+            st.error("❌ 請填股票代號")
+        elif not _t_image:
+            st.error("❌ 請上傳截圖")
+        else:
+            import datetime as _tdt
+            import json as _tjson
+            _tw_now_dt = _tdt.datetime.utcnow() + _tdt.timedelta(hours=8)
+            _ts_str = _tw_now_dt.strftime("%Y-%m-%d_%H%M%S")
+            _ext = _t_image.name.split(".")[-1].lower()
+            _filename = f"{_ts_str}_{_t_code}_{_t_action}.{_ext}"
+            _filepath = _trades_dir / _filename
+            _filepath.write_bytes(_t_image.getbuffer())
+
+            _record = {
+                "ts": _tw_now_dt.isoformat(timespec="seconds"),
+                "code": _t_code,
+                "action": _t_action,
+                "shares": int(_t_shares) if _t_shares else None,
+                "price": float(_t_price) if _t_price else None,
+                "note": _t_note or "",
+                "image": _filename,
+            }
+            with open(_trade_records_f, "a", encoding="utf-8") as _tf:
+                _tf.write(_tjson.dumps(_record, ensure_ascii=False) + "\n")
+
+            st.success(f"✅ 已儲存：{_filename}")
+            if _is_cloud_ts:
+                st.info("⚠️ 雲端 session 重啟後檔案會消失。要永久存請開桌機 Tailscale 版重新上傳。")
+            st.rerun()
+
+    st.divider()
+
+    # ── 顯示最近 10 筆 ──
+    st.markdown("### 📋 最近交易記錄")
+    if not _trade_records_f.exists():
+        st.info("尚無交易記錄")
+    else:
+        import json as _tjson2
+        _records = []
+        for _line in _trade_records_f.read_text(encoding="utf-8").splitlines():
+            _line = _line.strip()
+            if not _line: continue
+            try:
+                _records.append(_tjson2.loads(_line))
+            except: pass
+        _records.sort(key=lambda x: x.get("ts", ""), reverse=True)
+        _records = _records[:10]
+
+        if not _records:
+            st.info("尚無交易記錄")
+        else:
+            for _r in _records:
+                _action_color = {"買": "#d62728", "加碼": "#d62728", "賣": "#2ca02c", "減碼": "#2ca02c"}.get(_r.get("action"), "#666")
+                _price_str = f"@ {_r['price']:.2f}" if _r.get("price") else ""
+                _shares_str = f"{_r['shares']:,} 股" if _r.get("shares") else ""
+                _img_path = _trades_dir / _r["image"] if _r.get("image") else None
+                with st.container(border=True):
+                    _c1, _c2 = st.columns([1, 2])
+                    with _c1:
+                        if _img_path and _img_path.exists():
+                            st.image(str(_img_path), use_container_width=True)
+                        else:
+                            st.caption("⚠️ 截圖已消失（雲端 session 已重跑）")
+                    with _c2:
+                        st.markdown(
+                            f"<div style='font-weight:700; font-size:16px'>"
+                            f"<span style='color:{_action_color}'>{_r.get('action','')}</span> "
+                            f"<b>{_r.get('code','')}</b> {_shares_str} {_price_str}"
+                            f"</div>"
+                            f"<div style='color:#666; font-size:11px'>{_r.get('ts','')}</div>",
+                            unsafe_allow_html=True,
+                        )
+                        if _r.get("note"):
+                            st.caption(f"📝 {_r['note']}")
 
 # 預先抓事件，緊急訊號區會用到
 upcoming = upcoming_events(30)
