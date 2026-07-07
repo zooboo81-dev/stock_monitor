@@ -13,6 +13,7 @@ Priority Levels:
 """
 from __future__ import annotations
 import json
+import os
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -21,12 +22,18 @@ CONFIG_FILE = Path(__file__).parent / "pushover_config.json"
 
 
 def _load_config() -> dict | None:
-    if not CONFIG_FILE.exists():
-        return None
-    try:
-        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+    """優先讀 pushover_config.json（本機）；fallback 讀環境變數（GitHub Actions / Streamlit Secrets）"""
+    if CONFIG_FILE.exists():
+        try:
+            return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    # 環境變數 fallback（GitHub Actions Secrets / Streamlit Secrets）
+    user_key = os.environ.get("PUSHOVER_USER_KEY", "")
+    api_token = os.environ.get("PUSHOVER_API_TOKEN", "")
+    if user_key and api_token:
+        return {"user_key": user_key, "api_token": api_token, "enabled": True}
+    return None
 
 
 def send_push(title: str, body: str, priority: int = 0,
