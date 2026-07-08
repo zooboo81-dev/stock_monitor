@@ -6,3 +6,9 @@ code,name,market,shares,cost,category,stop_loss,entry_date,hold_type
 2449,京元電子,TSE,1000,337.48,半導體,253,,core
 3583,辛耘,TSE,1000,904.29,半導體,678,2026-07-01,core
 6285,啟碁,TSE,2000,253.11,通訊,190,,core
+00878,國泰永續高股息,TSE,0,0,高股息ETF,,,income
+2884,玉山金,TSE,0,0,金融,,,income
+2886,兆豐金,TSE,0,0,金融,,,income
+5880,合庫金,TSE,0,0,金融,,,income
+2891,中信金,TSE,0,0,金融,,,income
+2412,中華電,TSE,0,0,電信,,,income
