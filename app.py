@@ -821,6 +821,9 @@ rows: list[dict] = []
 all_signals: list[tuple[str, str, str]] = []
 stock_details: dict[str, dict] = {}  # 給主力分析區用：{code: {hist, score_data, instit}}
 for _, r in agg.iterrows():
+    # 7/07 修：跳過 shares=0 的 placeholder 部位（如未買的 income）
+    if int(r.get("shares", 0) or 0) <= 0:
+        continue
     q = quotes.get(r["code"])
     hist = fetch_history(r["code"], r["market"])
     ind = compute_indicators(hist)
