@@ -1030,6 +1030,70 @@ with st.expander("💰 資產明細 — 點開查看", expanded=False):
         f"參考姿勢：≥70% 防禦、50-70% 謹慎、30-50% 平衡、15-30% 進攻、<15% 全壓"
     )
 
+# ═══════════════ 📊 資產配置監控（7/07 新增）═══════════════
+try:
+    import json as _aj
+    _atarget_f = Path("data/allocation_targets.json")
+    if _atarget_f.exists() and not df.empty:
+        _atargets = _aj.loads(_atarget_f.read_text(encoding="utf-8")).get("targets", {})
+        # 計算目前各層資產（用市值）
+        _actual = {"swing": 0, "core": 0, "income": 0, "cash": _cash}
+        # 從 raw_df 讀 hold_type，跟 df（持股市值）合併
+        _hold_map = dict(zip(raw_df["code"].astype(str),
+                              raw_df["hold_type"].fillna("swing") if "hold_type" in raw_df.columns else ["swing"]*len(raw_df)))
+        for _, _r in df.iterrows():
+            _code = str(_r["代號"])
+            _val = _r.get("帳面收入") or 0
+            if pd.isna(_val) or _val <= 0: continue
+            _ht = _hold_map.get(_code, "swing")
+            if _ht not in _actual:
+                _ht = "swing"
+            _actual[_ht] += float(_val)
+
+        _target_total = sum(v["target_twd"] for v in _atargets.values())
+        _actual_total = sum(_actual.values())
+
+        with st.expander("📊 資產配置監控 — 點開查看", expanded=False):
+            st.caption(f"目標總資產：{_target_total:,.0f} ｜ 實際總資產：{_actual_total:,.0f} "
+                       f"({(_actual_total/_target_total*100):.1f}% 完成)")
+            for _key in ["swing", "core", "income", "cash"]:
+                _cfg = _atargets.get(_key, {})
+                _label = _cfg.get("label", _key)
+                _target = _cfg.get("target_twd", 0)
+                _color = _cfg.get("color", "#666")
+                _val = _actual.get(_key, 0)
+                _pct_actual = (_val / _target_total * 100) if _target_total else 0
+                _pct_target = (_target / _target_total * 100) if _target_total else 0
+                _fill_ratio = min(100, (_val / _target * 100)) if _target else 0
+                _drift = _pct_actual - _pct_target
+                _drift_emo = "✅" if abs(_drift) <= 5 else ("⚠️" if abs(_drift) <= 15 else "🚨")
+                _diff = _val - _target
+
+                _diff_color = "#d62728" if _diff < 0 else "#2ca02c"
+                st.markdown(
+                    f"<div style='background:#fafafa; border:1px solid #e0e0e0; border-radius:6px; "
+                    f"padding:10px 14px; margin:6px 0; color:#1a1a1a'>"
+                    f"<div style='display:flex; justify-content:space-between; align-items:baseline; margin-bottom:5px'>"
+                    f"<span style='font-weight:700; font-size:14px'>{_label}</span>"
+                    f"<span style='font-size:11px; color:#666'>"
+                    f"實際 <b style='color:#111'>{_val:,.0f}</b> "
+                    f"／ 目標 {_target:,.0f} "
+                    f"（差 <b style='color:{_diff_color}'>{_diff:+,.0f}</b>）</span>"
+                    f"</div>"
+                    f"<div style='background:#eee; height:14px; border-radius:3px; overflow:hidden; margin-bottom:3px'>"
+                    f"<div style='background:{_color}; width:{_fill_ratio:.1f}%; height:100%'></div>"
+                    f"</div>"
+                    f"<div style='display:flex; justify-content:space-between; font-size:11px; color:#666'>"
+                    f"<span>{_fill_ratio:.1f}% 完成</span>"
+                    f"<span>{_drift_emo} 佔比 {_pct_actual:.1f}% / 目標 {_pct_target:.1f}% (drift {_drift:+.1f}%)</span>"
+                    f"</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            st.caption("💡 drift 顏色說明：✅ ±5% 健康  ｜  ⚠️ ±15% 需注意  ｜  🚨 >15% 需 rebalance")
+except Exception as _e:
+    pass  # 配置監控失敗不影響其他功能
+
 # 套用總經修正到每檔評分（給排行榜用）
 def _combined_score(stock_s: int) -> int:
     macro_adj = max(-2, min(2, macro_score // 2 if macro_score else 0))

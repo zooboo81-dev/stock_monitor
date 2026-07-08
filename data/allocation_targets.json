@@ -1,0 +1,11 @@
+{
+  "_comment": "資產配置目標（可編輯調整）",
+  "targets": {
+    "swing": {"label": "🎯 短線", "target_twd": 1000000, "color": "#f9a825"},
+    "core": {"label": "💎 長線 core", "target_twd": 1800000, "color": "#1976d2"},
+    "income": {"label": "🏦 穩定定存", "target_twd": 4000000, "color": "#2e7d32"},
+    "cash": {"label": "💵 現金彈藥", "target_twd": 1200000, "color": "#666"}
+  },
+  "drift_threshold_pct": 15,
+  "_note": "總目標 800 萬，drift > 15% 觸發警告"
+}
