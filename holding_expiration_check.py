@@ -71,6 +71,9 @@ def main():
 
     reminded = []
     for h in holdings:
+        # 7/07 升級：core（長線）不做 T+10 提醒
+        if (h.get("hold_type") or "swing").strip().lower() == "core":
+            continue
         entry_str = (h.get("entry_date") or "").strip()
         if not entry_str:
             continue
