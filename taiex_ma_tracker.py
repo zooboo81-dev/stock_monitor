@@ -75,6 +75,12 @@ def fetch_taiex_status() -> dict | None:
                     recent_oversold_date = twii.index[-1 - i].strftime("%Y-%m-%d")
                     break
 
+        # 7/07 新增：60 日高點 + 空頭市場加碼觸發判斷
+        high_60d = float(twii["Close"].tail(60).max()) if len(twii) >= 60 else last
+        high_120d = float(twii["Close"].tail(120).max()) if len(twii) >= 120 else last
+        peak = max(high_60d, high_120d)
+        dist_peak_pct = (last - peak) / peak * 100  # 負值
+
         return {
             "date": twii.index[-1].strftime("%Y-%m-%d"),
             "close": last,
@@ -87,12 +93,86 @@ def fetch_taiex_status() -> dict | None:
             "dist_ma20_pct": (last - ma20) / ma20 * 100,
             "dist_ma60_pct": (last - ma60) / ma60 * 100,
             "dist_ma200_pct": (last - ma200) / ma200 * 100,
+            "peak_120d": peak,
+            "dist_peak_pct": dist_peak_pct,
             "recent_oversold": recent_oversold,
             "recent_oversold_close": recent_oversold_close,
             "recent_oversold_date": recent_oversold_date,
         }
     except Exception:
         return None
+
+
+def check_bear_market_trigger(status: dict, prev_state: dict | None) -> dict | None:
+    """空頭市場加碼觸發器
+    Levels:
+      -10% 從高點 → 追加當月定存 50%
+      -15% 從高點 → 追加當月定存 100%
+      -20% 從高點 → all-in 現金彈藥（技術性熊市）
+      -25% 從高點 → 極度加碼（深度熊市）
+    只在觸發**新等級**時推播（避免每日重複）
+    """
+    dist_peak = status.get("dist_peak_pct", 0)
+    peak = status.get("peak_120d", 0)
+    close = status.get("close", 0)
+
+    # 判定當前等級
+    if dist_peak <= -25:
+        level = 25
+    elif dist_peak <= -20:
+        level = 20
+    elif dist_peak <= -15:
+        level = 15
+    elif dist_peak <= -10:
+        level = 10
+    else:
+        level = 0
+
+    prev_level = (prev_state or {}).get("bear_alert_level", 0)
+
+    if level > prev_level and level > 0:
+        actions = {
+            10: ("🟡 -10% 淺洗", "追加當月定存 **50%**（多打 12.5 萬）\n\n"
+                 "🎯 標的分配（+12.5 萬）：\n"
+                 "• 00878 買 4 萬\n"
+                 "• 4 檔銀行各 1.5 萬\n"
+                 "• 中華電 2.5 萬\n\n"
+                 "⚠️ 這是**入門機會**，還不用重壓"),
+            15: ("🟠 -15% 中度洗盤", "追加當月定存 **100%**（多打 25 萬）\n\n"
+                 "🎯 標的分配（+25 萬）：\n"
+                 "• 00878 買 8 萬\n"
+                 "• 4 檔銀行各 3 萬\n"
+                 "• 中華電 5 萬\n\n"
+                 "💡 開始有價值了，可以中度加碼"),
+            20: ("🔴 -20% 技術性熊市", "All-in 現金彈藥 **一半**（打 55 萬）\n\n"
+                 "🎯 標的分配（+55 萬）：\n"
+                 "• 00878 買 20 萬\n"
+                 "• 4 檔銀行各 6 萬\n"
+                 "• 中華電 11 萬\n\n"
+                 "🔥 融資開始斷頭，**這是有意義的加碼位**"),
+            25: ("🔴🔴 -25% 深度熊市", "All-in **全部彈藥**（打剩下的 55 萬）\n\n"
+                 "🎯 標的分配（+55 萬）：\n"
+                 "• 00878 買 20 萬\n"
+                 "• 4 檔銀行各 6 萬\n"
+                 "• 中華電 11 萬\n\n"
+                 "💎 融資基本洗淨，**長線大買點**\n"
+                 "⚠️ 但若跌到 -30% 只能靠新資金"),
+        }
+        label, body = actions[level]
+        title = f"🚨 空頭市場加碼觸發：{label}"
+        detail = (
+            f"📊 大盤狀態：\n"
+            f"• 現在 TAIEX {close:,.0f}\n"
+            f"• 高點 {peak:,.0f}\n"
+            f"• 距高點 {dist_peak:+.2f}%\n\n"
+            f"💰 建議動作：\n{body}\n\n"
+            f"📅 執行時機：\n"
+            f"• 今日或明日盤中\n"
+            f"• 分批進場（分 3 天）\n\n"
+            f"⚠️ 提醒：只加碼**定存區 6 檔**，不要碰短線"
+        )
+        return {"level": level, "title": title, "body": detail, "priority": 1}
+    return None
 
 
 def classify(status: dict) -> dict:
@@ -192,7 +272,27 @@ def main():
     prev_state = load_state()
     changed = (prev_state is None) or (prev_state.get("level") != cls["level"])
 
+    # 7/07 新增：空頭市場加碼觸發判定（-10%/-15%/-20%/-25%）
+    bear_alert = check_bear_market_trigger(status, prev_state)
+    if bear_alert:
+        state["bear_alert_level"] = bear_alert["level"]
+    else:
+        # 保留上一次的等級，除非大盤反彈脫離觸發區
+        state["bear_alert_level"] = (prev_state or {}).get("bear_alert_level", 0)
+        # 大盤反彈脫離 -8% 以上 → 重置
+        if status.get("dist_peak_pct", 0) > -8:
+            state["bear_alert_level"] = 0
+
     save_state(state)
+
+    # 空頭觸發推播（優先於一般 MA 訊號）
+    if bear_alert and not quiet:
+        try:
+            import telegram_notify
+            telegram_notify.send(bear_alert["title"], bear_alert["body"])
+            print(f"🚨 空頭警報推送：{bear_alert['title']}")
+        except Exception as e:
+            print(f"⚠️ 空頭警報推送錯誤：{e}")
 
     # 狀態改變才推播
     if changed and not quiet:
