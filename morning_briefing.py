@@ -234,6 +234,22 @@ def main():
                 f"\n距 20MA {ma['dist_ma20_pct']:+.2f}% ｜ 60MA {ma['dist_ma60_pct']:+.2f}%"
                 f"\n→ {ma['action']}"
             )
+
+            # 7/09 新增：反彈確認閾值提醒（只在跌破 5MA 或 20MA 才顯示）
+            _close = ma.get("close", 0)
+            _ma5 = ma.get("ma5", 0)
+            _dist_ma20 = ma.get("dist_ma20_pct", 0)
+            if _close and _ma5 and (_close < _ma5 or _dist_ma20 < 0):
+                _thr_ma5 = _ma5
+                _thr_rise = _close * 1.01
+                _threshold = max(_thr_ma5, _thr_rise)
+                _rise_pct = (_threshold - _close) / _close * 100
+                msg += (
+                    f"\n\n🎯 反彈確認閾值："
+                    f"\n• 收 ≥ {_threshold:,.0f}（漲 ≥ {_rise_pct:.2f}%）"
+                    f"\n• 站回 5MA {_ma5:,.0f} + 漲 1%+"
+                    f"\n→ ✅ 觸發即可分批進場定存區"
+                )
     except Exception:
         pass
 
