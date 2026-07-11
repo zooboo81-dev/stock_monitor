@@ -1,0 +1,40 @@
+name: Walk-Forward Monthly Validation
+
+on:
+  schedule:
+    # 每月 15 號 09:00 台灣 = 01:00 UTC（避開月初其他排程）
+    - cron: '0 1 15 * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run Walk-Forward validation
+        env:
+          PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+          PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
+        run: python backtest_walkforward.py
+
+      - name: Commit
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          # 只 commit notifications.jsonl（CSV 在 .gitignore）
+          git add data/notifications.jsonl
+          git diff --staged --quiet && echo "無變動" || (git commit -m "chore: monthly walkforward" && git push)

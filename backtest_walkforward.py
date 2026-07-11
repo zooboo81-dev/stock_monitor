@@ -219,6 +219,47 @@ def main():
     print()
     print("\n".join(lines))
 
+    # 7/09 新增：推 Pushover 手機摘要
+    try:
+        import telegram_notify
+        # 簡化摘要（手機看得下）
+        latest = monthly[-1] if monthly else None
+        title_prefix = "📊 Walk-Forward 月度驗證"
+        # 判斷整體狀態
+        if summary["positive_months_pct"] >= 70 and summary["avg_ic"] >= 0.10:
+            emo = "✅"
+            status = "策略穩定"
+        elif summary["positive_months_pct"] >= 50 and summary["avg_ic"] >= 0.05:
+            emo = "🟡"
+            status = "策略中等"
+        else:
+            emo = "🚨"
+            status = "策略警訊"
+
+        title = f"{emo} {title_prefix}：{status}"
+
+        body_lines = [
+            f"📅 分析 {summary['months_analyzed']} 個月",
+            f"📈 T+5 平均 {summary['avg_t5_return']:+.2f}%",
+            f"🎯 正報酬月份 {summary['positive_months_pct']}%",
+            f"🎲 勝率 {summary['avg_win_rate']}%",
+            f"🧠 IC {summary['avg_ic']:.3f}",
+            "",
+            "月度細節：",
+        ]
+        for m in monthly[-3:]:  # 只顯示最近 3 個月
+            body_lines.append(
+                f"• {m['month']}: T+5 {m['avg_t5_return']:+.2f}% "
+                f"｜ 勝率 {m['win_rate_pct']}% ｜ IC {m['ic_t5']:.3f}"
+            )
+        body_lines.append("")
+        body_lines.append("👉 完整 CSV：data_export/walkforward_by_month.csv")
+
+        telegram_notify.send(title, "\n".join(body_lines))
+        print("✅ 已推播摘要到手機")
+    except Exception as e:
+        print(f"⚠️ 推播錯誤：{e}")
+
 
 if __name__ == "__main__":
     main()
