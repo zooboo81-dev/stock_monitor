@@ -291,18 +291,27 @@ def top_picks(
                     continue
 
             # ★ 強制回測 + 嚴格品質過濾（6/17 鴻海/聯茂/瑞軒/定穎 教訓）
+            # 7/09 升級：加樣本門檻 + Deflated Sharpe 概念
+            # 樣本 < 15：直接排除（統計不可靠）
+            # 樣本 15-30：需要更高 EV 門檻（+3%）
+            # 樣本 30+：一般門檻（+2%）
             edge_stats = compute_stock_edge(code, hist)
             edge_ev = edge_stats.get("expectancy", 0.0)
             edge_n = edge_stats.get("total_trades", 0)
             edge_wr = edge_stats.get("win_rate", 0.0)
-            # 規則：
-            #  - 樣本 < 5：資料不足，給 benefit of doubt 保留
-            #  - 樣本 ≥ 5 + EV < 0：反指標踢出
-            #  - 樣本 ≥ 5 + (EV < 2% 或 勝率 < 50%)：嚴格雙條件，任一弱就排除
-            if edge_n >= 5:
-                if edge_ev < 0:
+            wr_pct = edge_wr * 100 if edge_wr < 1 else edge_wr
+
+            # 樣本量過濾（統計顯著性）
+            if edge_n < 15:
+                continue  # 樣本不足，統計不可靠
+            if edge_ev < 0:
+                continue  # EV 為負直接踢出
+            # 樣本 15-30：小樣本需要更高 EV 門檻（Deflated Sharpe 概念）
+            if edge_n < 30:
+                if edge_ev < 3.0 or wr_pct < 55:
                     continue
-                wr_pct = edge_wr * 100 if edge_wr < 1 else edge_wr
+            else:
+                # 樣本 30+：一般門檻
                 if edge_ev < 2.0 or wr_pct < 50:
                     continue
 

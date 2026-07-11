@@ -230,6 +230,12 @@ def update_records(records: list[dict]) -> int:
         code = rec["code"]
 
         # T+1 ~ T+20 檢查
+        # 7/09 升級：加入 slippage 保守回測（+0.3% 進、-0.3% 出）
+        # 更貼近實戰：不會當天收盤買到、賣出也有 spread
+        SLIPPAGE_ENTRY = 1.003  # 進場 +0.3%
+        SLIPPAGE_EXIT = 0.997   # 出場 -0.3%
+        entry_realistic = entry * SLIPPAGE_ENTRY
+
         for t in [1, 5, 10, 20]:
             key = f"t{t}_price"
             if rec.get(key) is not None:
@@ -246,7 +252,13 @@ def update_records(records: list[dict]) -> int:
             px = _fetch_close_at(code, target)
             if px:
                 rec[key] = round(px, 2)
+                # 原始 return（理論值）
                 rec[f"t{t}_return_pct"] = round((px - entry) / entry * 100, 2)
+                # 實戰 return（含 slippage）
+                px_realistic = px * SLIPPAGE_EXIT
+                rec[f"t{t}_return_realistic_pct"] = round(
+                    (px_realistic - entry_realistic) / entry_realistic * 100, 2
+                )
                 updated += 1
 
         # 更新區間最高/最低
