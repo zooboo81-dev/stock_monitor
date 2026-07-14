@@ -1,5 +1,4 @@
 code,name,market,shares,cost,category,stop_loss,entry_date,hold_type
-00631L,元大台灣50正2,TSE,6000,38.22,指數ETF,36.2,,swing
 1513,中興電,TSE,4000,170.49,傳產,158,,swing
 2312,金寶,TSE,3000,35.4,電子,33,,swing
 2337,旺宏,TSE,3000,160.23,半導體,136,2026-06-19,swing
