@@ -4,6 +4,8 @@ on:
   schedule:
     # 台灣 9:00-13:35 每 5 分鐘 = UTC 01:00-05:35
     - cron: '*/5 1-5 * * 1-5'
+    # 7/14 加：台灣 14:30 收盤後補檢查一次（--force 忽略時段限制）
+    - cron: '30 6 * * 1-5'
   workflow_dispatch:
 
 jobs:
@@ -29,7 +31,16 @@ jobs:
         env:
           PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
           PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
-        run: python intraday_alert.py
+        # 收盤後 14:30 檢查用 --force（其他時段照常）
+        run: |
+          HOUR=$(date -u +%H)
+          MIN=$(date -u +%M)
+          # UTC 06:30 = 台灣 14:30 → force
+          if [ "$HOUR" = "06" ] && [ "$MIN" = "30" ]; then
+            python intraday_alert.py --force
+          else
+            python intraday_alert.py
+          fi
 
       - name: Commit
         run: |

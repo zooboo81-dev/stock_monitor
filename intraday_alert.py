@@ -170,13 +170,25 @@ def fetch_portfolio_prices(session: requests.Session) -> list[dict]:
     today_iso = datetime.now().strftime("%Y-%m-%d")
     out = []
     for _, r in df.iterrows():
+        # 7/14 修：跳過 shares=0 的 placeholder（income 定存區未買標的）
+        try:
+            if int(r.get("shares", 0) or 0) <= 0:
+                continue
+        except (ValueError, TypeError):
+            continue
+        # 跳過 cost=0（避免 trailing_stop 除以零）
+        try:
+            entry = float(r["cost"])
+            if entry <= 0:
+                continue
+        except (ValueError, TypeError):
+            continue
         code = r["code"]
         q = quotes.get(code)
         if not q:
             continue
         px = q["price"]
         today_high = q["today_high"]
-        entry = float(r["cost"])
         sl_str = str(r.get("stop_loss", ""))
         try:
             fixed_sl = float(sl_str)
@@ -292,7 +304,10 @@ def send_toast(title: str, msg: str) -> None:
 
 
 def main():
-    if not is_trading_hours():
+    import sys as _sys
+    # 7/14 新增：--force 參數 = 忽略交易時段（收盤後也能檢查）
+    force = "--force" in _sys.argv
+    if not is_trading_hours() and not force:
         return
 
     today = date.today().isoformat()
