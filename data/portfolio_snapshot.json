@@ -1,19 +1,12 @@
 {
-  "date": "2026-07-07",
+  "date": "2026-07-15",
   "positions": {
-    "00631L": {
-      "name": "元大台灣50正2",
-      "shares": 6000,
-      "cost": 38.22,
-      "category": "指數ETF",
-      "stop_loss": 36.2
-    },
     "1513": {
       "name": "中興電",
       "shares": 4000,
       "cost": 170.49,
-      "category": "傳產",
-      "stop_loss": 158.0
+      "category": "綠能/電網",
+      "stop_loss": 128.0
     },
     "2312": {
       "name": "金寶",
@@ -34,21 +27,63 @@
       "shares": 1000,
       "cost": 337.48,
       "category": "半導體",
-      "stop_loss": 310.0
+      "stop_loss": 253.0
     },
     "3583": {
       "name": "辛耘",
       "shares": 1000,
       "cost": 904.29,
       "category": "半導體",
-      "stop_loss": 839.0
+      "stop_loss": 678.0
     },
     "6285": {
       "name": "啟碁",
       "shares": 2000,
       "cost": 253.11,
       "category": "通訊",
-      "stop_loss": 228.0
+      "stop_loss": 190.0
+    },
+    "00878": {
+      "name": "國泰永續高股息",
+      "shares": 0,
+      "cost": 0.0,
+      "category": "高股息ETF",
+      "stop_loss": null
+    },
+    "2884": {
+      "name": "玉山金",
+      "shares": 0,
+      "cost": 0.0,
+      "category": "金融",
+      "stop_loss": null
+    },
+    "2886": {
+      "name": "兆豐金",
+      "shares": 0,
+      "cost": 0.0,
+      "category": "金融",
+      "stop_loss": null
+    },
+    "5880": {
+      "name": "合庫金",
+      "shares": 0,
+      "cost": 0.0,
+      "category": "金融",
+      "stop_loss": null
+    },
+    "2891": {
+      "name": "中信金",
+      "shares": 0,
+      "cost": 0.0,
+      "category": "金融",
+      "stop_loss": null
+    },
+    "2412": {
+      "name": "中華電",
+      "shares": 0,
+      "cost": 0.0,
+      "category": "電信",
+      "stop_loss": null
     }
   }
 }
