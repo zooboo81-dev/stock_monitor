@@ -1,1 +1,11 @@
-{"date": "2026-07-31", "alerted": ["stop_2312", "stop_2337", "stop_2449", "stop_3583", "taiex_break_5ma", "taiex_break_10ma"]}
+{
+  "date": "2026-07-31",
+  "alerted": [
+    "stop_2312",
+    "stop_2337",
+    "stop_2449",
+    "stop_3583",
+    "taiex_break_5ma",
+    "taiex_break_10ma"
+  ]
+}
