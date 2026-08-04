@@ -44,6 +44,31 @@ import yfinance as yf
 
 STATE_FILE = Path("data/taiex_ma_state.json")
 STATE_FILE.parent.mkdir(exist_ok=True)
+POLICY_FILE = Path("data/bear_trigger_policy.json")
+
+
+def _load_bear_policy() -> dict:
+    try:
+        return json.loads(POLICY_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _wan(twd: float) -> str:
+    """金額（元）→『X 萬』字串"""
+    s = f"{twd / 10000:.1f}"
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s + " 萬"
+
+
+def _deepest_level_idx(dist_peak: float, levels: list[dict]) -> int:
+    """回傳已達到的最深等級 index（-1 = 未觸發）。levels 依 drop_pct 由淺到深。"""
+    reached = -1
+    for i, lv in enumerate(levels):
+        if dist_peak <= lv.get("drop_pct", 0):
+            reached = i
+    return reached
 
 
 def fetch_taiex_status() -> dict | None:
@@ -104,75 +129,103 @@ def fetch_taiex_status() -> dict | None:
 
 
 def check_bear_market_trigger(status: dict, prev_state: dict | None) -> dict | None:
-    """空頭市場加碼觸發器
-    Levels:
-      -10% 從高點 → 追加當月定存 50%
-      -15% 從高點 → 追加當月定存 100%
-      -20% 從高點 → all-in 現金彈藥（技術性熊市）
-      -25% 從高點 → 極度加碼（深度熊市）
-    只在觸發**新等級**時推播（避免每日重複）
+    """空頭市場加碼觸發器（相加語意 + 累積階梯 + 彈藥上限）
+
+    規則（寫死進系統，避免臨場猶豫）：
+      - 觸發加碼動用『保留彈藥』，**疊加在當月定期定額之上**（兩者分開、不取代）
+      - 各等級是『累積投入目標』，實際加碼 = 新等級累積 − 已投入
+      - 快速崩跌一步到位會補齊前面等級；總投入永不超過 reserve_twd
+      - 已投彈藥為單向棘輪，反彈只重置『狀態燈號』，不退回彈藥
+    設定全來自 data/bear_trigger_policy.json（可記事本編輯）。
+    只在觸發**更深等級**時推播。
     """
+    policy = _load_bear_policy()
+    levels = policy.get("levels", [])
+    if not levels:
+        return None
+
+    reserve = float(policy.get("reserve_twd", 0))
+    split = {k: v for k, v in policy.get("income_split", {}).items() if not k.startswith("_")}
+    names = policy.get("income_names", {})
+    dca_map = {k: v for k, v in policy.get("monthly_dca", {}).items() if not k.startswith("_")}
+
     dist_peak = status.get("dist_peak_pct", 0)
     peak = status.get("peak_120d", 0)
     close = status.get("close", 0)
 
-    # 判定當前等級
-    if dist_peak <= -25:
-        level = 25
-    elif dist_peak <= -20:
-        level = 20
-    elif dist_peak <= -15:
-        level = 15
-    elif dist_peak <= -10:
-        level = 10
-    else:
-        level = 0
+    prev = prev_state or {}
+    deploy_idx_prev = prev.get("bear_deploy_idx", -1)
+    deployed_twd = float(prev.get("bear_deployed_twd", 0))
 
-    prev_level = (prev_state or {}).get("bear_alert_level", 0)
+    cur_idx = _deepest_level_idx(dist_peak, levels)
 
-    if level > prev_level and level > 0:
-        actions = {
-            10: ("🟡 -10% 淺洗", "追加當月定存 **50%**（多打 12.5 萬）\n\n"
-                 "🎯 標的分配（+12.5 萬）：\n"
-                 "• 00878 買 4 萬\n"
-                 "• 4 檔銀行各 1.5 萬\n"
-                 "• 中華電 2.5 萬\n\n"
-                 "⚠️ 這是**入門機會**，還不用重壓"),
-            15: ("🟠 -15% 中度洗盤", "追加當月定存 **100%**（多打 25 萬）\n\n"
-                 "🎯 標的分配（+25 萬）：\n"
-                 "• 00878 買 8 萬\n"
-                 "• 4 檔銀行各 3 萬\n"
-                 "• 中華電 5 萬\n\n"
-                 "💡 開始有價值了，可以中度加碼"),
-            20: ("🔴 -20% 技術性熊市", "All-in 現金彈藥 **一半**（打 55 萬）\n\n"
-                 "🎯 標的分配（+55 萬）：\n"
-                 "• 00878 買 20 萬\n"
-                 "• 4 檔銀行各 6 萬\n"
-                 "• 中華電 11 萬\n\n"
-                 "🔥 融資開始斷頭，**這是有意義的加碼位**"),
-            25: ("🔴🔴 -25% 深度熊市", "All-in **全部彈藥**（打剩下的 55 萬）\n\n"
-                 "🎯 標的分配（+55 萬）：\n"
-                 "• 00878 買 20 萬\n"
-                 "• 4 檔銀行各 6 萬\n"
-                 "• 中華電 11 萬\n\n"
-                 "💎 融資基本洗淨，**長線大買點**\n"
-                 "⚠️ 但若跌到 -30% 只能靠新資金"),
-        }
-        label, body = actions[level]
-        title = f"🚨 空頭市場加碼觸發：{label}"
+    # 沒有觸發更深等級 → 不動作
+    if cur_idx <= deploy_idx_prev:
+        return None
+
+    lv = levels[cur_idx]
+    cum_target = float(lv.get("cum_deploy_twd", 0))
+    remaining = max(0.0, reserve - deployed_twd)
+    tranche = min(max(0.0, cum_target - deployed_twd), remaining)  # 鎖死不超過彈藥
+
+    # 彈藥用罄卻出現更深等級 → 推一則『無彈藥』提醒
+    if tranche <= 0:
+        title = f"🚨 空頭更深：{lv['label']}（彈藥已用罄）"
         detail = (
-            f"📊 大盤狀態：\n"
-            f"• 現在 TAIEX {close:,.0f}\n"
-            f"• 高點 {peak:,.0f}\n"
-            f"• 距高點 {dist_peak:+.2f}%\n\n"
-            f"💰 建議動作：\n{body}\n\n"
-            f"📅 執行時機：\n"
-            f"• 今日或明日盤中\n"
-            f"• 分批進場（分 3 天）\n\n"
-            f"⚠️ 提醒：只加碼**定存區 6 檔**，不要碰短線"
+            f"📊 大盤 {close:,.0f}，距高點 {dist_peak:+.2f}%（新等級 {lv['label']}）\n\n"
+            f"⚠️ 保留彈藥 {_wan(reserve)} 已全數投入，無法再從彈藥加碼。\n"
+            f"👉 選項：本月定期定額照常執行，或動用**新資金**。\n"
+            f"（不要挪用短線／生活資金硬接）"
         )
-        return {"level": level, "title": title, "body": detail, "priority": 1}
-    return None
+        return {
+            "level": lv["drop_pct"], "title": title, "body": detail, "priority": 1,
+            "deploy_idx": cur_idx, "deployed_twd": deployed_twd,
+        }
+
+    new_deployed = deployed_twd + tranche
+    new_remaining = reserve - new_deployed
+
+    # 加碼金額分配到定存區 6 檔
+    alloc_lines = [
+        f"• {names.get(code, code)} {code} 買 {_wan(tranche * w)}"
+        for code, w in split.items()
+    ]
+
+    # 本月定期定額（相加語意的另一半）
+    month_key = date.today().strftime("%Y-%m")
+    dca_wan = dca_map.get(month_key)
+    if dca_wan:
+        total_wan = dca_wan + tranche / 10000
+        dca_line = (
+            f"🔁 本月合併動作（相加，不取代）：\n"
+            f"• 定期定額照原計畫投 {dca_wan} 萬（定存區 6 檔）\n"
+            f"• 彈藥加碼再投 {_wan(tranche)}（分配如上）\n"
+            f"• 本月總投入 ≈ {total_wan:.1f} 萬"
+        )
+    else:
+        dca_line = (
+            f"🔁 本月合併動作：\n"
+            f"• 定期定額已完成（本月無）\n"
+            f"• 只執行彈藥加碼 {_wan(tranche)}（分配如上）"
+        )
+
+    title = f"🚨 空頭加碼觸發：{lv['label']}"
+    detail = (
+        f"📊 大盤狀態：\n"
+        f"• 現在 TAIEX {close:,.0f}\n"
+        f"• 高點 {peak:,.0f}\n"
+        f"• 距高點 {dist_peak:+.2f}%\n\n"
+        f"💰 本次彈藥加碼 {_wan(tranche)}（{lv.get('note', '')}）：\n"
+        + "\n".join(alloc_lines) + "\n\n"
+        + dca_line + "\n\n"
+        f"🎒 彈藥進度：已投 {_wan(new_deployed)} / {_wan(reserve)}，剩 {_wan(new_remaining)}\n\n"
+        f"📅 執行：今日或明日盤中，可分 2-3 天\n"
+        f"⚠️ 只加碼**定存區 6 檔**，不碰短線；彈藥不夠不硬湊"
+    )
+    return {
+        "level": lv["drop_pct"], "title": title, "body": detail, "priority": 1,
+        "deploy_idx": cur_idx, "deployed_twd": new_deployed,
+    }
 
 
 def classify(status: dict) -> dict:
@@ -272,15 +325,21 @@ def main():
     prev_state = load_state()
     changed = (prev_state is None) or (prev_state.get("level") != cls["level"])
 
-    # 7/07 新增：空頭市場加碼觸發判定（-10%/-15%/-20%/-25%）
+    # 空頭市場加碼觸發判定（設定見 data/bear_trigger_policy.json）
     bear_alert = check_bear_market_trigger(status, prev_state)
+
+    # 彈藥部署狀態：延續前值（單向棘輪，反彈不退回彈藥）
+    _reset_above = _load_bear_policy().get("reset_above_pct", -8)
+    state["bear_deploy_idx"] = (prev_state or {}).get("bear_deploy_idx", -1)
+    state["bear_deployed_twd"] = (prev_state or {}).get("bear_deployed_twd", 0)
     if bear_alert:
+        state["bear_deploy_idx"] = bear_alert["deploy_idx"]
+        state["bear_deployed_twd"] = bear_alert["deployed_twd"]
         state["bear_alert_level"] = bear_alert["level"]
     else:
-        # 保留上一次的等級，除非大盤反彈脫離觸發區
+        # 狀態燈號：大盤反彈脫離觸發區 → 重置顯示（彈藥部署狀態不動）
         state["bear_alert_level"] = (prev_state or {}).get("bear_alert_level", 0)
-        # 大盤反彈脫離 -8% 以上 → 重置
-        if status.get("dist_peak_pct", 0) > -8:
+        if status.get("dist_peak_pct", 0) > _reset_above:
             state["bear_alert_level"] = 0
 
     save_state(state)
