@@ -14,6 +14,7 @@ Priority Levels:
 from __future__ import annotations
 import json
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -69,10 +70,43 @@ def send_push(title: str, body: str, priority: int = 0,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status == 200
+            raw = resp.read().decode()
+        j = json.loads(raw)
+        # Pushover 接受 = status:1；但 info 若含「no active devices」代表沒送到手機
+        # （舊版只看 HTTP 200 → 沒裝置時仍回 True，靜默失敗數天無人知）
+        info = j.get("info", "")
+        if j.get("status") == 1 and not info:
+            return True
+        problem = info or "；".join(j.get("errors", [])) or f"status={j.get('status')}"
+        print(f"⚠️ Pushover 未送達手機：{problem}")
+        return False
     except Exception as e:
         print(f"Pushover 錯誤：{e}")
         return False
+
+
+def check_health() -> tuple[bool, str]:
+    """檢查 Pushover 是否有 active 裝置（validate 端點，不發訊息、不耗額度）。
+    回傳 (ok, 說明)；儀表板用來顯示警告橫幅。檢查本身失敗時回 (True, ...) 避免誤報。"""
+    cfg = _load_config()
+    if not cfg or not cfg.get("enabled"):
+        # 拿不到金鑰（如雲端未設 secrets）→ 無法判斷，回 True 不示警避免誤報
+        return (True, "未設定，跳過檢查")
+    try:
+        data = urllib.parse.urlencode(
+            {"token": cfg["api_token"], "user": cfg["user_key"]}).encode()
+        req = urllib.request.Request(
+            "https://api.pushover.net/1/users/validate.json", data=data)
+        try:
+            with urllib.request.urlopen(req, timeout=8) as r:
+                j = json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            j = json.loads(e.read().decode())
+        if j.get("status") == 1 and j.get("devices"):
+            return (True, f"{len(j['devices'])} 個裝置正常")
+        return (False, "；".join(j.get("errors", [])) or "沒有 active 裝置")
+    except Exception as e:
+        return (True, f"健康檢查連線失敗（不阻斷）：{e}")
 
 
 def is_configured() -> bool:

@@ -624,6 +624,34 @@ with st.expander(
         if len(_all_notifs) > 30:
             st.caption(f"（僅顯示最新 30 則，共 {len(_all_notifs)} 則）")
 
+# 🔴 Pushover 健康檢查：沒 active 裝置時，手機推播會靜默失敗 → 頂部紅色橫幅示警
+try:
+    import pushover_notify as _pn
+    # 雲端：把 Streamlit secrets 映射成環境變數，讓 check_health 拿得到金鑰
+    try:
+        for _k in ("PUSHOVER_USER_KEY", "PUSHOVER_API_TOKEN"):
+            if _k not in os.environ and _k in st.secrets:
+                os.environ[_k] = str(st.secrets[_k])
+    except Exception:
+        pass
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _pushover_health():
+        return _pn.check_health()
+
+    _ph_ok, _ph_msg = _pushover_health()
+    if not _ph_ok:
+        st.markdown(
+            f"<div style='background:#fde7e9; border-left:6px solid #d62728; "
+            f"padding:10px 14px; border-radius:6px; margin:8px 0; color:#1a1a1a; "
+            f"font-size:13px;'>🔴 <b>Pushover 手機推播異常</b>：{_ph_msg}。"
+            f"<br><span style='color:#555'>系統警示（晨間摘要／停損／空頭觸發）"
+            f"不會送達手機。請開 iPhone 的 Pushover App 確認裝置已登入／未到期。</span></div>",
+            unsafe_allow_html=True,
+        )
+except Exception:
+    pass
+
 # 未讀 → 用 st.toast 彈提醒（Streamlit 1.28+）
 try:
     if _unread and len(_unread) <= 3:
