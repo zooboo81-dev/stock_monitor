@@ -25,8 +25,8 @@ def _guess_priority(title: str, body: str) -> int:
         return 2
     if any(k in text for k in ("硬底線", "強制認賠")):
         return 2
-    # 🔴 High：跌破停損 / 大盤警示 / 盤中警示
-    if any(k in title for k in ("🔴", "⛔", "跌破停損", "盤中警示")):
+    # 🔴 High：跌破停損 / 大盤警示 / 盤中警示 / 抄底反彈進場閘門
+    if any(k in title for k in ("🔴", "⛔", "跌破停損", "盤中警示", "🚀", "抄底反彈")):
         return 1
     if "T+10" in title or "到期" in title:
         return 1

@@ -367,8 +367,11 @@ def main():
                 f"建議：{cls['action']}\n\n"
                 f"⚠️ 仍以 TXF 訊號為主"
             )
-            ok = telegram_notify.send("📊 TAIEX MA 訊號", body)
-            print(f"✅ Telegram 推送：{'成功' if ok else '失敗'}")
+            # 「抄底反彈確認」是雲端進場放行閘門 → 專屬標題 + high 優先級（強震跳最上）
+            is_rebound = cls.get("is_rebound_signal", False)
+            push_title = "🚀 抄底反彈確認【可分批進場】" if is_rebound else "📊 TAIEX MA 訊號"
+            ok = telegram_notify.send(push_title, body)
+            print(f"✅ Telegram 推送（{push_title}）：{'成功' if ok else '失敗'}")
         except Exception as e:
             print(f"⚠️ Telegram 推送錯誤：{e}")
     elif not changed:
