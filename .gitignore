@@ -34,6 +34,7 @@ data_export/
 # 桌機專用（雲端不需要）
 start_hidden.vbs
 run_*.vbs
+telegram_intake.vbs
 allow_phone_access.bat
 
 # Python 標準
@@ -76,3 +77,9 @@ data/trades/*
 !data/trades/.gitkeep
 data/trade_records.jsonl
 pushover_config.json
+
+# Telegram 截圖更新器 runtime state（桌機專用，狂變）
+data/telegram_intake_offset.json
+data/telegram_intake_applied.json
+data/telegram_intake_pending.json
+data/intake_debug.txt
