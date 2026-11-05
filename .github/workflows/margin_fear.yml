@@ -1,0 +1,60 @@
+name: Margin & Fear Gauge
+
+on:
+  schedule:
+    # 證交所融資資料約 21:30 後公布
+    # 台灣 22:20 = UTC 14:20；23:30 = UTC 15:30 補跑（已處理過的日期會自動跳過）
+    - cron: '20 14 * * 1-5'
+    - cron: '30 15 * * 1-5'
+  workflow_dispatch:  # 允許手動觸發測試
+  push:
+    # 程式或排程本身有改 → 推上來就跑一次驗證（已處理過的日期會自動跳過，不會重複推播）
+    branches: [main]
+    paths:
+      - margin_fear_gauge.py
+      - .github/workflows/margin_fear.yml
+
+concurrency:
+  group: margin-fear
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: |
+          pip install yfinance requests pandas
+
+      - name: Run gauge
+        env:
+          PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+          PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
+        run: python margin_fear_gauge.py
+
+      - name: Commit state
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data/margin_fear_history.json data/margin_fear_state.json data/notifications.jsonl
+          if git diff --staged --quiet; then
+            echo "無變動"
+          else
+            git commit -m "chore: update margin & fear gauge"
+            git pull --rebase
+            git push
+          fi

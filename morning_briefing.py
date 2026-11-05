@@ -253,6 +253,15 @@ def main():
     except Exception:
         pass
 
+    # 📉 融資維持率＋恐慌指數（margin_fear_gauge 前一晚寫入）
+    try:
+        import margin_fear_gauge
+        _fear = margin_fear_gauge.summary_line()
+        if _fear:
+            msg += "\n\n" + _fear
+    except Exception:
+        pass
+
     # 📔 Trade Journal 待回顧提醒
     try:
         import json

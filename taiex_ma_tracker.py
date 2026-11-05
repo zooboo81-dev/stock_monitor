@@ -62,6 +62,16 @@ def _wan(twd: float) -> str:
     return s + " 萬"
 
 
+def _fear_line() -> str:
+    """最新一筆融資維持率＋恐慌指數（margin_fear_gauge 每晚寫入，這裡只讀檔）"""
+    try:
+        import margin_fear_gauge
+        line = margin_fear_gauge.summary_line()
+        return f"\n\n{line}" if line else ""
+    except Exception:
+        return ""
+
+
 def _deepest_level_idx(dist_peak: float, levels: list[dict]) -> int:
     """回傳已達到的最深等級 index（-1 = 未觸發）。levels 依 drop_pct 由淺到深。"""
     reached = -1
@@ -348,7 +358,7 @@ def main():
     if bear_alert and not quiet:
         try:
             import telegram_notify
-            telegram_notify.send(bear_alert["title"], bear_alert["body"])
+            telegram_notify.send(bear_alert["title"], bear_alert["body"] + _fear_line())
             print(f"🚨 空頭警報推送：{bear_alert['title']}")
         except Exception as e:
             print(f"⚠️ 空頭警報推送錯誤：{e}")
@@ -366,6 +376,7 @@ def main():
                 f"距 200MA {status['dist_ma200_pct']:+.2f}%\n\n"
                 f"建議：{cls['action']}\n\n"
                 f"⚠️ 仍以 TXF 訊號為主"
+                + _fear_line()
             )
             # 「抄底反彈確認」是雲端進場放行閘門 → 專屬標題 + high 優先級（強震跳最上）
             is_rebound = cls.get("is_rebound_signal", False)

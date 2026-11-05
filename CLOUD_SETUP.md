@@ -9,6 +9,7 @@
 | TAIEX MA Tracker | 14:00 | `0 6 * * 1-5` | 週一至五 |
 | Watchlist Check | 14:40 | `40 6 * * 1-5` | 週一至五 |
 | Recs Snapshot | 17:30 | `30 9 * * 1-5` | 週一至五 |
+| Margin & Fear Gauge（融資維持率＋台指/美股 VIX） | 22:20、23:30 補跑 | `20 14 * * 1-5`、`30 15 * * 1-5` | 週一至五 |
 
 ⚠️ GitHub Actions cron 可能延遲 5-15 分鐘（免費帳號）
 
