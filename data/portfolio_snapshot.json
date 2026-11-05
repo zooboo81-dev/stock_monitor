@@ -1,5 +1,5 @@
 {
-  "date": "2026-08-03",
+  "date": "2026-11-05",
   "positions": {
     "1513": {
       "name": "中興電",
@@ -8,26 +8,12 @@
       "category": "綠能/電網",
       "stop_loss": 128.0
     },
-    "2312": {
-      "name": "金寶",
-      "shares": 3000,
-      "cost": 35.4,
-      "category": "電子",
-      "stop_loss": 33.0
-    },
-    "2337": {
-      "name": "旺宏",
-      "shares": 3000,
-      "cost": 160.23,
-      "category": "半導體",
-      "stop_loss": 136.0
-    },
     "2449": {
       "name": "京元電子",
-      "shares": 1000,
-      "cost": 337.48,
+      "shares": 3050,
+      "cost": 276.79,
       "category": "半導體",
-      "stop_loss": 253.0
+      "stop_loss": 208.0
     },
     "3583": {
       "name": "辛耘",
@@ -38,17 +24,66 @@
     },
     "6285": {
       "name": "啟碁",
-      "shares": 2000,
-      "cost": 253.11,
+      "shares": 3000,
+      "cost": 251.86,
       "category": "通訊",
-      "stop_loss": 190.0
+      "stop_loss": 189.0
     },
-    "00878": {
-      "name": "國泰永續高股息",
-      "shares": 0,
-      "cost": 0.0,
-      "category": "高股息ETF",
-      "stop_loss": null
+    "0050": {
+      "name": "元大台灣50",
+      "shares": 18000,
+      "cost": 105.33,
+      "category": "指數ETF",
+      "stop_loss": 79.0
+    },
+    "2382": {
+      "name": "廣達",
+      "shares": 1000,
+      "cost": 284.91,
+      "category": "AI伺服器",
+      "stop_loss": 214.0
+    },
+    "2376": {
+      "name": "技嘉",
+      "shares": 1000,
+      "cost": 343.99,
+      "category": "AI伺服器",
+      "stop_loss": 258.0
+    },
+    "3711": {
+      "name": "日月光投控",
+      "shares": 1000,
+      "cost": 609.87,
+      "category": "半導體",
+      "stop_loss": 457.0
+    },
+    "3105": {
+      "name": "穩懋",
+      "shares": 1000,
+      "cost": 377.04,
+      "category": "半導體",
+      "stop_loss": 283.0
+    },
+    "6669": {
+      "name": "緯穎",
+      "shares": 200,
+      "cost": 2085.47,
+      "category": "AI伺服器",
+      "stop_loss": 1564.0
+    },
+    "2308": {
+      "name": "台達電",
+      "shares": 900,
+      "cost": 1768.62,
+      "category": "電源散熱",
+      "stop_loss": 1327.0
+    },
+    "3264": {
+      "name": "欣銓",
+      "shares": 1000,
+      "cost": 230.33,
+      "category": "半導體",
+      "stop_loss": 173.0
     },
     "2884": {
       "name": "玉山金",
