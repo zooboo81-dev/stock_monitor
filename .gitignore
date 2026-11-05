@@ -78,6 +78,10 @@ data/trades/*
 data/trade_records.jsonl
 pushover_config.json
 
+# 桌機專用通知 + 本機已讀紀錄（2026-11-05：桌機不再寫雲端共用的 notifications.jsonl）
+data/notifications_local.jsonl
+data/notifications_read.json
+
 # Telegram 截圖更新器 runtime state（桌機專用，狂變）
 data/telegram_intake_offset.json
 data/telegram_intake_applied.json

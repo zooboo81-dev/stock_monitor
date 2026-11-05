@@ -523,38 +523,18 @@ if c_btn.button("🔄 立即刷新"):
 
 # ──────────────── 🔔 通知中心 ────────────────
 def _load_notifications():
-    from pathlib import Path as _P
-    import json as _json
+    """雲端共用 notifications.jsonl ＋ 桌機專用 notifications_local.jsonl（11/05 拆開，見 telegram_notify）"""
     from datetime import datetime as _dtn, timedelta as _tdn
-    nf = _P("data/notifications.jsonl")
-    if not nf.exists():
-        return []
+    import telegram_notify as _tn
     # 7/07 升級：支援未來排程通知，只顯示 ts <= 台灣時間現在
     _tw_now = (_dtn.utcnow() + _tdn(hours=8)).isoformat(timespec="seconds")
-    out = []
-    for line in nf.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = _json.loads(line)
-            # 未來排程通知（ts > 現在）先隱藏，時間到才顯示
-            if rec.get("ts", "") > _tw_now:
-                continue
-            out.append(rec)
-        except Exception:
-            continue
-    return sorted(out, key=lambda x: x.get("ts", ""), reverse=True)
+    return _tn.load_all(until_ts=_tw_now)
 
 
-def _save_notifications(records):
-    from pathlib import Path as _P
-    import json as _json
-    nf = _P("data/notifications.jsonl")
-    nf.write_text(
-        "\n".join(_json.dumps(r, ensure_ascii=False) for r in records) + "\n",
-        encoding="utf-8",
-    )
+def _mark_all_read(records):
+    """已讀只記在 notifications_read.json，不改寫通知檔（避免 git 追蹤的檔變髒擋 Pull）"""
+    import telegram_notify as _tn
+    _tn.mark_all_read(records)
 
 
 _all_notifs = _load_notifications()
@@ -587,9 +567,7 @@ if _unread:
             unsafe_allow_html=True,
         )
         if _cn2.button("✅ 全部標為已讀", key="mark_all_read"):
-            for _n in _all_notifs:
-                _n["read"] = True
-            _save_notifications(_all_notifs)
+            _mark_all_read(_all_notifs)
             st.rerun()
 
 # 折疊區顯示所有通知
