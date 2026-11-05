@@ -1,0 +1,21 @@
+{
+ "last_date": "2026-11-05",
+ "zones": {
+  "maint": 0,
+  "tw_vix": 0,
+  "us_vix": -1
+ },
+ "latest": {
+  "date": "2026-11-05",
+  "taiex": 41574.72,
+  "taiex_pct": -3.2,
+  "maint_ratio": 155.73,
+  "margin_yi": 5764.09,
+  "margin_chg_yi": -205.37,
+  "coverage_pct": 99.78,
+  "tw_vix": 39.92,
+  "us_vix": 16.61,
+  "us_vix_date": "2026-11-04"
+ },
+ "updated_at": "2026-11-05T23:29:26+08:00"
+}
