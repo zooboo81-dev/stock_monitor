@@ -84,9 +84,26 @@ def _deepest_level_idx(dist_peak: float, levels: list[dict]) -> int:
 def fetch_taiex_status() -> dict | None:
     """抓 TAIEX 即時 + 算 MA 距離 + 反彈確認資料"""
     try:
-        twii = yf.Ticker("^TWII").history(period="1y", auto_adjust=False).dropna(subset=["Close"])
+        # 11/11：1y → 2y，趨勢箭頭（trend.py）的多空方需要較長的歷史才穩
+        twii = yf.Ticker("^TWII").history(period="2y", auto_adjust=False).dropna(subset=["Close"])
         if len(twii) < 200:
             return None
+        try:
+            # yfinance 有時缺當天那一根 → 用證交所官方收盤指數補
+            from market_data import patch_index_bar
+            twii = patch_index_bar(twii)
+        except Exception:
+            pass
+        try:
+            from trend import stat_sentence, trend_state
+            _tr = trend_state(twii, "index")
+            _tr_fields = {
+                "trend_t": _tr.get("t"), "trend_text": _tr.get("text"),
+                "trend_side": _tr.get("side"), "trend_side_since": _tr.get("side_since"),
+                "trend_stat_text": stat_sentence(_tr, "index"),
+            }
+        except Exception:
+            _tr_fields = {}
         last = float(twii["Close"].iloc[-1])
         ma5 = float(twii["Close"].tail(5).mean())
         ma20 = float(twii["Close"].tail(20).mean())
@@ -133,6 +150,7 @@ def fetch_taiex_status() -> dict | None:
             "recent_oversold": recent_oversold,
             "recent_oversold_close": recent_oversold_close,
             "recent_oversold_date": recent_oversold_date,
+            **_tr_fields,
         }
     except Exception:
         return None
@@ -330,6 +348,7 @@ def main():
           f"200MA {status['dist_ma200_pct']:+.2f}%")
     print(f"  狀態：{cls['level']} — {cls['label']}")
     print(f"  建議：{cls['action']}")
+    print(f"  趨勢：{status.get('trend_text')}（{status.get('trend_side')}，{status.get('trend_side_since')} 起）")
 
     # 跟昨日比較看是否改變
     prev_state = load_state()
@@ -363,6 +382,31 @@ def main():
         except Exception as e:
             print(f"⚠️ 空頭警報推送錯誤：{e}")
 
+    # 11/11：大盤多空方翻轉推播（推薦榜的閘門跟著開關，這是全系統最重要的一個燈）
+    _prev_side = (prev_state or {}).get("trend_side")
+    _new_side = status.get("trend_side")
+    if _prev_side in ("long", "short") and _new_side in ("long", "short") and _prev_side != _new_side and not quiet:
+        try:
+            import telegram_notify
+            if _new_side == "short":
+                _t = "⛔ 大盤轉空方【推薦榜暫停】"
+                _b = (f"趨勢 {status.get('trend_text')}（5 項均線結構只剩 {status.get('trend_t')} 項成立）\n"
+                      f"收盤 {status['close']:,.0f}（{status['chg_pct']:+.2f}%）\n\n"
+                      f"{status.get('trend_stat_text', '')}\n\n"
+                      f"動作：不加碼個股、不照推薦榜進場、既有部位守停損。\n"
+                      f"（定存區的定期定額／空頭彈藥規則照舊，不受影響）\n"
+                      f"解除條件：5 項結構回到 3 項以上成立")
+            else:
+                _t = "✅ 大盤回到多方【推薦榜恢復】"
+                _b = (f"趨勢 {status.get('trend_text')}（5 項均線結構 {status.get('trend_t')} 項成立）\n"
+                      f"收盤 {status['close']:,.0f}（{status['chg_pct']:+.2f}%）\n\n"
+                      f"{status.get('trend_stat_text', '')}\n\n"
+                      f"動作：推薦榜恢復，只推個股本身也是 ⬆ 多頭的。")
+            telegram_notify.send(_t, _b + _fear_line())
+            print(f"📣 多空方翻轉推送：{_t}")
+        except Exception as e:
+            print(f"⚠️ 多空方翻轉推送錯誤：{e}")
+
     # 狀態改變才推播
     if changed and not quiet:
         try:
@@ -375,6 +419,8 @@ def main():
                 f"距 60MA {status['dist_ma60_pct']:+.2f}%\n"
                 f"距 200MA {status['dist_ma200_pct']:+.2f}%\n\n"
                 f"建議：{cls['action']}\n\n"
+                f"趨勢箭頭：{status.get('trend_text', '—')}"
+                f"（{'多方' if status.get('trend_side') == 'long' else '空方'}，{status.get('trend_side_since', '')} 起）\n"
                 f"⚠️ 仍以 TXF 訊號為主"
                 + _fear_line()
             )

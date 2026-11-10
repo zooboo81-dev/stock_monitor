@@ -101,7 +101,7 @@ def backtest_stock(
                     exit_reason = "time_out"
                 elif days_held >= 3 and days_held % 2 == 0:
                     sliced = h.iloc[: i + 1]
-                    cur_score = smart_money_score(sliced, instit=None).get("score", 0)
+                    cur_score = smart_money_score(sliced, instit=None, with_trend=False).get("score", 0)
                     if cur_score <= score_exit_threshold:
                         exit_reason = "trend_reverse"
             else:
@@ -129,7 +129,7 @@ def backtest_stock(
             if market_bullish is not None and not bool(market_bullish.iloc[i]):
                 continue
             sliced = h.iloc[: i + 1]
-            score = smart_money_score(sliced, instit=None).get("score", 0)
+            score = smart_money_score(sliced, instit=None, with_trend=False).get("score", 0)
             if score >= signal_threshold:
                 in_position = True
                 entry_idx = i

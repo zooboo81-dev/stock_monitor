@@ -34,9 +34,18 @@ def load_recs():
         if not line:
             continue
         try:
-            recs.append(json.loads(line))
+            r = json.loads(line)
         except Exception:
-            pass
+            continue
+        # 11/11：只算乾淨紀錄（排除過期股價、假日重複快照）
+        if r.get("quality", "ok") != "ok":
+            continue
+        # 報酬改用「隔日開盤買、扣成本」的實際可得數字（沒有就退回理論值）
+        for t in (5, 10):
+            real = r.get(f"t{t}_return_realistic_pct")
+            if real is not None:
+                r[f"t{t}_return_pct"] = real
+        recs.append(r)
     return recs
 
 

@@ -2,10 +2,24 @@
 
 所有函式都是純 pandas/numpy，無第三方 TA 套件依賴
 （避免 pandas-ta 在 pandas 3.0 下的相容問題）。
+
+2026-11-11 回測後調整（trend_backtest.py，流動性前 300 大 × 2020~2026，約 47 萬個樣本）：
+  - KD、K 線型態、乖離 三項改成「只顯示、不計分」：
+      KD 低檔黃金交叉(+2) 之後 20 日反而輸同期個股 0.40%，高檔死叉/超買反而贏 → 方向是反的
+      K 線型態 之後 20 日超額 ≈ 0（沒資訊）
+      正乖離 ≥8%（原本扣分）之後 20 日贏 1.07% → 扣分扣錯邊
+  - 計分只留：MACD、均線排列、量價、法人
+  - 方向（箭頭）改由 trend.trend_state 統一提供，放在回傳的 "trend"
 """
 from __future__ import annotations
 
 import pandas as pd
+
+from trend import trend_state
+
+# 回測證明無效或方向相反 → 只顯示不計分（要恢復計分把名稱從這裡拿掉即可）
+DISPLAY_ONLY = {"KD", "K線", "乖離"}
+_NOTE = "｜參考，不計分"
 
 
 # ──────────────── 技術指標 ────────────────
@@ -89,12 +103,12 @@ def detect_candle_pattern(df: pd.DataFrame) -> tuple[str, str] | None:
 # ──────────────── 主力評分聚合 ────────────────
 def _empty_score() -> dict:
     return {"score": 0, "verdict": "資料不足", "verdict_emoji": "⚪",
-            "breakdown": [], "indicators": {},
+            "breakdown": [], "indicators": {}, "trend": trend_state(None),
             "attention_level": 0, "attention_reasons": [],
             "bullish_cnt": 0, "bearish_cnt": 0}
 
 
-def smart_money_score(hist: pd.DataFrame, instit: dict | None = None) -> dict:
+def smart_money_score(hist: pd.DataFrame, instit: dict | None = None, with_trend: bool = True) -> dict:
     """
     回傳 {
       'score': int (-10..+10),
@@ -133,29 +147,23 @@ def smart_money_score(hist: pd.DataFrame, instit: dict | None = None) -> dict:
             score -= 1
             breakdown.append(("MACD", -1, "0 軸下方且柱狀放大（空方延續）"))
 
-    # 2) KD：黃金交叉 / 死叉 / 超買 / 超賣
+    # 2) KD：只顯示不計分（回測：低檔金叉之後反而弱、高檔死叉反而強）
     k, d = kd_taiwan(h)
     if len(k) >= 2:
         cross_up = k.iloc[-1] > d.iloc[-1] and k.iloc[-2] <= d.iloc[-2]
         cross_dn = k.iloc[-1] < d.iloc[-1] and k.iloc[-2] >= d.iloc[-2]
         if cross_up and k.iloc[-1] < 50:
-            score += 2
-            breakdown.append(("KD", +2, f"低檔黃金交叉 K={k.iloc[-1]:.0f} D={d.iloc[-1]:.0f}"))
+            breakdown.append(("KD", 0, f"低檔黃金交叉 K={k.iloc[-1]:.0f} D={d.iloc[-1]:.0f}{_NOTE}"))
         elif cross_up:
-            score += 1
-            breakdown.append(("KD", +1, f"黃金交叉 K={k.iloc[-1]:.0f}"))
+            breakdown.append(("KD", 0, f"黃金交叉 K={k.iloc[-1]:.0f}{_NOTE}"))
         elif cross_dn and k.iloc[-1] > 50:
-            score -= 2
-            breakdown.append(("KD", -2, f"高檔死亡交叉 K={k.iloc[-1]:.0f} D={d.iloc[-1]:.0f}"))
+            breakdown.append(("KD", 0, f"高檔死亡交叉 K={k.iloc[-1]:.0f} D={d.iloc[-1]:.0f}{_NOTE}"))
         elif cross_dn:
-            score -= 1
-            breakdown.append(("KD", -1, f"死亡交叉 K={k.iloc[-1]:.0f}"))
+            breakdown.append(("KD", 0, f"死亡交叉 K={k.iloc[-1]:.0f}{_NOTE}"))
         elif k.iloc[-1] >= 80:
-            score -= 1
-            breakdown.append(("KD", -1, f"超買區 K={k.iloc[-1]:.0f}（注意回檔）"))
+            breakdown.append(("KD", 0, f"超買區 K={k.iloc[-1]:.0f}{_NOTE}"))
         elif k.iloc[-1] <= 20:
-            score += 1
-            breakdown.append(("KD", +1, f"超賣區 K={k.iloc[-1]:.0f}（醞釀反彈）"))
+            breakdown.append(("KD", 0, f"超賣區 K={k.iloc[-1]:.0f}{_NOTE}"))
 
     # 3) 均線多空頭排列（5/10/20/60）
     if len(close) >= 60:
@@ -179,9 +187,7 @@ def smart_money_score(hist: pd.DataFrame, instit: dict | None = None) -> dict:
     candle = detect_candle_pattern(h)
     if candle:
         emoji, name = candle
-        pts = 1 if emoji == "🟢" else (-1 if emoji == "🔴" else 0)
-        score += pts
-        breakdown.append(("K線", pts, name))
+        breakdown.append(("K線", 0, f"{name}{_NOTE}"))
 
     # 5) 量價（爆量長紅/長黑、量價背離）
     vol = h["Volume"]
@@ -218,11 +224,9 @@ def smart_money_score(hist: pd.DataFrame, instit: dict | None = None) -> dict:
     if pd.notna(b10.iloc[-1]):
         b = float(b10.iloc[-1])
         if b >= 8:
-            score -= 1
-            breakdown.append(("乖離", -1, f"10日乖離 +{b:.1f}%（漲多）"))
+            breakdown.append(("乖離", 0, f"10日乖離 +{b:.1f}%（漲多，波動會變大）{_NOTE}"))
         elif b <= -8:
-            score += 1
-            breakdown.append(("乖離", +1, f"10日乖離 {b:.1f}%（跌深）"))
+            breakdown.append(("乖離", 0, f"10日乖離 {b:.1f}%（跌深）{_NOTE}"))
 
     # 限制範圍
     score = max(-10, min(10, score))
@@ -259,6 +263,15 @@ def smart_money_score(hist: pd.DataFrame, instit: dict | None = None) -> dict:
         attention_level = max(attention_level, 1)
         attention_reasons.append(f"法人連 {abs(instit['consecutive_days'])} 日同向")
 
+    # ★ 11/11：評分結論不能跟趨勢箭頭打架
+    #   空方（T<=1 起算）裡的高分 = 逆勢反彈訊號，回測：大盤空方時這種訊號 20 日平均 -2.2%、上漲率 38%
+    # with_trend=False 給 backtest.py 逐日重算用（省時間，回測只需要分數）
+    trend = trend_state(h, "stock") if with_trend else trend_state(None)
+    if trend["side"] == "short" and score >= 3:
+        verdict, emoji = "空方中的反彈訊號（先觀望，不加碼）", "⚪"
+    elif trend.get("t") == 5 and score <= -3:
+        verdict, emoji = "多頭中轉弱（留意，先不減碼）", "🟡"
+
     # ★ 7/06 優化 B：把 breakdown 拆成 5 維度分數
     dim_scores = _score_by_dimension(breakdown)
     # ★ 7/06 優化 C：辨識策略類型
@@ -275,6 +288,7 @@ def smart_money_score(hist: pd.DataFrame, instit: dict | None = None) -> dict:
         "bearish_cnt": bearish_cnt,
         "dim_scores": dim_scores,      # 7/06 新增
         "strategy": strategy,          # 7/06 新增
+        "trend": trend,                # 11/11 新增：統一的趨勢箭頭
         "indicators": {
             "macd_dif": float(dif.iloc[-1]) if len(dif) else None,
             "macd_dem": float(dem.iloc[-1]) if len(dem) else None,
@@ -304,7 +318,7 @@ def _score_by_dimension(breakdown: list[tuple[str, int, str]]) -> dict:
         "乖離":    "risk",
     }
     raw = {"trend": 0, "momentum": 0, "volume": 0, "chip": 0, "risk": 0}
-    max_possible = {"trend": 2, "momentum": 6, "volume": 2, "chip": 3, "risk": 1}  # 各維最大絕對值
+    max_possible = {"trend": 2, "momentum": 2, "volume": 2, "chip": 3, "risk": 1}  # 各維最大絕對值（11/11：動能只剩 MACD）
     for cat, pts, _ in breakdown:
         dim = dim_map.get(cat)
         if not dim:

@@ -27,6 +27,17 @@
   "status": "tracking"   # tracking → completed
 }
 
+2026-11-11 改版（量尺修正，舊紀錄已用 _repair_recs_history.py 重算）：
+  - snapshot_date 改用「評分實際用到的最新一根 K 的日期」(data_date)，不再用主機的今天
+    → 假日／週末不會再重複快照；雲端排程延遲到隔天凌晨跑也不會記錯日
+  - T+N 一律用實際交易日的 K 棒去數（以前用「扣掉六日」估，遇國定假日會錯）
+  - t{N}_return_pct          = 訊號日收盤 → T+N 收盤（理論值）
+    t{N}_return_realistic_pct = 隔日開盤買 → T+N 收盤賣，扣來回成本 0.585%（做得到的數字）
+    t{N}_excess_pct           = 理論值 − 同期間加權指數（有沒有贏大盤）
+  - quality 欄位：ok／stale_price（當時拿到的是前一天股價）／non_trading_day（假日重複快照）
+    統計時只算 ok
+  - 每次執行寫 data/recs_last_run.json（資料日、幾檔、大盤閘門有沒有擋），儀表板讀它
+
 用法：
   python recs_snapshot.py             # 完整流程：snapshot + 更新
   python recs_snapshot.py --no-snap   # 只更新，不新增
@@ -58,6 +69,14 @@ import yfinance as yf
 
 HIST_FILE = Path("data/recs_history.jsonl")
 HIST_FILE.parent.mkdir(exist_ok=True)
+LAST_RUN_FILE = Path("data/recs_last_run.json")
+COST_PCT = 0.585          # 來回手續費＋證交稅
+RULE_VERSION = 2          # 2 = 2026-11-11 起：大盤閘門＋個股 T=5＋KD 不計分
+
+
+def is_ok(rec: dict) -> bool:
+    """這筆紀錄能不能拿來算戰績（排除過期股價、假日重複快照）"""
+    return rec.get("quality", "ok") == "ok"
 
 
 def _twse_session() -> requests.Session:
@@ -97,12 +116,13 @@ def save_history(records: list[dict]) -> None:
 
 # ---------- snapshot 當日推薦榜 ----------
 
-def snapshot_today(top_n: int = 10) -> list[dict]:
-    """跑 discover.top_picks，回傳 snapshot 紀錄"""
+def snapshot_today(top_n: int = 10) -> tuple[list[dict], dict]:
+    """跑 discover.top_picks，回傳 (snapshot 紀錄, 執行資訊)"""
+    import discover
     from discover import top_picks
     from institutional import fetch_institutional_history
+    from market_data import taiwan_today
 
-    today = date.today().isoformat()
     session = _twse_session()
 
     # 持倉
@@ -127,11 +147,18 @@ def snapshot_today(top_n: int = 10) -> list[dict]:
         min_score=3,
         top_n=top_n,
     )
+    run = dict(discover.LAST_RUN)
+    mkt = run.get("market") or {}
+    # 快照日 = 評分實際用到的最新一根 K 的日期（不是主機的今天）
+    data_date = (max((p["data_date"] for p in picks), default=None)
+                 or run.get("data_date") or taiwan_today().isoformat())
 
     records = []
     for rank, p in enumerate(picks, 1):
+        tr = p.get("trend") or {}
         records.append({
-            "snapshot_date": today,
+            "snapshot_date": data_date,
+            "data_date": p.get("data_date", data_date),
             "rank": rank,
             "code": p["code"],
             "name": p.get("name", ""),
@@ -144,6 +171,11 @@ def snapshot_today(top_n: int = 10) -> list[dict]:
             "strategy_type": (p.get("strategy") or {}).get("type"),   # 優化 C
             "strategy_label": (p.get("strategy") or {}).get("label"),
             "dim_scores": p.get("dim_scores"),   # 優化 B
+            "trend_t": tr.get("t"),
+            "market_t": mkt.get("t"),
+            "market_side": mkt.get("side"),
+            "rule_version": RULE_VERSION,
+            "quality": "ok",
             "t1_price": None, "t1_return_pct": None,
             "t5_price": None, "t5_return_pct": None,
             "t10_price": None, "t10_return_pct": None,
@@ -151,128 +183,138 @@ def snapshot_today(top_n: int = 10) -> list[dict]:
             "max_gain_pct": None, "max_drawdown_pct": None,
             "status": "tracking",
         })
-    return records
+    info = {
+        "data_date": data_date,
+        "n_picks": len(records),
+        "gate_blocked": bool(run.get("gate_blocked")),
+        "market_text": mkt.get("text"), "market_t": mkt.get("t"),
+        "market_side": mkt.get("side"), "market_side_since": mkt.get("side_since"),
+        "patched_bars": run.get("patched", 0),
+        "n_scored": run.get("n_scored", 0), "n_trend_ok": run.get("n_trend_ok", 0),
+        "rule_version": RULE_VERSION,
+    }
+    return records, info
 
 
-# ---------- 更新 T+N 表現 ----------
+# ---------- 更新 T+N 表現（用實際 K 棒數交易日）----------
 
-def _trading_days_between(start: date, end: date) -> int:
-    """粗估交易日數（週末扣除，沒考慮國定假日）"""
-    n = 0
-    cur = start
-    while cur < end:
-        cur += timedelta(days=1)
-        if cur.weekday() < 5:
-            n += 1
-    return n
+def _strip_tz(df: pd.DataFrame) -> pd.DataFrame:
+    if getattr(df.index, "tz", None) is not None:
+        df = df.copy()
+        df.index = df.index.tz_localize(None)
+    return df
 
 
-def _fetch_close_at(code: str, target_date: date) -> float | None:
-    """抓 target_date 當日（或最近交易日）收盤價"""
-    ticker = f"{code}.TW"
+def fetch_bars(codes: list[str], start: date) -> dict[str, pd.DataFrame]:
+    """一次抓多檔日 K（先 .TW 再 .TWO），並用官方收盤補上最新一根。"""
+    out: dict[str, pd.DataFrame] = {}
+    if not codes:
+        return out
+
+    def _dl(tickers: list[str]) -> dict[str, pd.DataFrame]:
+        got: dict[str, pd.DataFrame] = {}
+        try:
+            d = yf.download(tickers, start=start.isoformat(), auto_adjust=False, progress=False,
+                            group_by="ticker", threads=True)
+        except Exception:
+            return got
+        for t in tickers:
+            try:
+                x = d[t] if isinstance(d.columns, pd.MultiIndex) else d
+                x = x.dropna(subset=["Close"])
+                if len(x) >= 1:
+                    got[t.split(".")[0]] = _strip_tz(x)
+            except Exception:
+                continue
+        return got
+
+    out.update(_dl([f"{c}.TW" for c in codes]))
+    missing = [c for c in codes if c not in out]
+    if missing:
+        out.update(_dl([f"{c}.TWO" for c in missing]))
     try:
-        # 取 target_date 前後 5 天的歷史
-        start = target_date - timedelta(days=3)
-        end = target_date + timedelta(days=3)
-        h = yf.Ticker(ticker).history(start=start, end=end, auto_adjust=False).dropna(subset=["Close"])
-        if h.empty:
-            # 上櫃改 .TWO
-            ticker2 = f"{code}.TWO"
-            h = yf.Ticker(ticker2).history(start=start, end=end, auto_adjust=False).dropna(subset=["Close"])
-        if h.empty:
-            return None
-        # 取最接近 target_date 但不晚於它的那天
-        h.index = h.index.date
-        valid = [d for d in h.index if d <= target_date]
-        if not valid:
-            return None
-        return float(h.loc[max(valid), "Close"])
+        from market_data import patch_latest_bars
+        out, _, _ = patch_latest_bars(out, _twse_session())
+    except Exception:
+        pass
+    return out
+
+
+def fetch_taiex(start: date) -> pd.DataFrame | None:
+    try:
+        t = yf.Ticker("^TWII").history(start=start.isoformat(), auto_adjust=False).dropna(subset=["Close"])
+        return _strip_tz(t) if not t.empty else None
     except Exception:
         return None
 
 
-def _fetch_price_range(code: str, start_date: date, end_date: date) -> dict | None:
-    """抓區間最高/最低/收盤"""
-    ticker = f"{code}.TW"
-    try:
-        h = yf.Ticker(ticker).history(start=start_date, end=end_date + timedelta(days=2),
-                                       auto_adjust=False).dropna(subset=["Close"])
-        if h.empty:
-            ticker2 = f"{code}.TWO"
-            h = yf.Ticker(ticker2).history(start=start_date, end=end_date + timedelta(days=2),
-                                            auto_adjust=False).dropna(subset=["Close"])
-        if h.empty:
-            return None
-        return {
-            "high": float(h["High"].max()),
-            "low": float(h["Low"].min()),
-            "last": float(h["Close"].iloc[-1]),
-        }
-    except Exception:
-        return None
+def compute_outcomes(rec: dict, bars: pd.DataFrame, taiex: pd.DataFrame | None) -> bool:
+    """用 K 棒重算一筆紀錄的 T+N（就地修改 rec）。回傳是否有任何欄位被填。
+    錨點 = data_date（沒有就用 snapshot_date）當天或之前最近的一根。
+    報酬全部用同一條價格序列的比值算，之後除權息調整也不會錯。
+    """
+    anchor = pd.Timestamp(rec.get("data_date") or rec["snapshot_date"])
+    idx = int(bars.index.searchsorted(anchor, side="right")) - 1
+    if idx < 0:
+        return False
+    c0 = float(bars["Close"].iloc[idx])
+    if c0 <= 0:
+        return False
+    n = len(bars)
+    o1 = float(bars["Open"].iloc[idx + 1]) if idx + 1 < n else None
+    changed = False
+
+    t_idx = None
+    if taiex is not None and not taiex.empty:
+        t_idx = int(taiex.index.searchsorted(bars.index[idx], side="right")) - 1
+        if t_idx < 0:
+            t_idx = None
+
+    if o1:
+        rec["next_open"] = round(o1, 2)
+        rec["gap_pct"] = round((o1 / c0 - 1) * 100, 2)
+
+    for t in (1, 5, 10, 20):
+        if idx + t >= n:
+            continue
+        ct = float(bars["Close"].iloc[idx + t])
+        rec[f"t{t}_price"] = round(ct, 2)
+        rec[f"t{t}_return_pct"] = round((ct / c0 - 1) * 100, 2)
+        if o1:
+            rec[f"t{t}_return_realistic_pct"] = round((ct / o1 - 1) * 100 - COST_PCT, 2)
+        if t_idx is not None and t_idx + t < len(taiex):
+            b = (float(taiex["Close"].iloc[t_idx + t]) / float(taiex["Close"].iloc[t_idx]) - 1) * 100
+            rec[f"t{t}_excess_pct"] = round(rec[f"t{t}_return_pct"] - b, 2)
+        changed = True
+
+    if idx + 1 < n:
+        win = bars.iloc[idx + 1: idx + 21]
+        rec["max_gain_pct"] = round((float(win["High"].max()) / c0 - 1) * 100, 2)
+        rec["max_drawdown_pct"] = round((float(win["Low"].min()) / c0 - 1) * 100, 2)
+
+    if idx + 20 < n and rec.get("t20_price") is not None:
+        rec["status"] = "completed"
+    return changed
 
 
 def update_records(records: list[dict]) -> int:
-    """走訪所有 tracking 中的紀錄，更新 T+N。回傳更新筆數"""
-    today = date.today()
+    """更新所有 tracking 中的紀錄。回傳更新筆數"""
+    todo = [r for r in records if r.get("status") != "completed" and r.get("entry_price")]
+    if not todo:
+        return 0
+    start = min(datetime.strptime(r.get("data_date") or r["snapshot_date"], "%Y-%m-%d").date()
+                for r in todo) - timedelta(days=10)
+    bars = fetch_bars(sorted({r["code"] for r in todo}), start)
+    taiex = fetch_taiex(start)
     updated = 0
-
-    for rec in records:
-        if rec.get("status") == "completed":
+    for rec in todo:
+        b = bars.get(rec["code"])
+        if b is None or b.empty:
             continue
-
-        snap_date = datetime.strptime(rec["snapshot_date"], "%Y-%m-%d").date()
-        entry = rec.get("entry_price")
-        if not entry:
-            continue
-
-        days_elapsed = _trading_days_between(snap_date, today)
-        code = rec["code"]
-
-        # T+1 ~ T+20 檢查
-        # 7/09 升級：加入 slippage 保守回測（+0.3% 進、-0.3% 出）
-        # 更貼近實戰：不會當天收盤買到、賣出也有 spread
-        SLIPPAGE_ENTRY = 1.003  # 進場 +0.3%
-        SLIPPAGE_EXIT = 0.997   # 出場 -0.3%
-        entry_realistic = entry * SLIPPAGE_ENTRY
-
-        for t in [1, 5, 10, 20]:
-            key = f"t{t}_price"
-            if rec.get(key) is not None:
-                continue
-            if days_elapsed < t:
-                continue
-            # 計算 T+t 的日期
-            target = snap_date
-            d = 0
-            while d < t:
-                target += timedelta(days=1)
-                if target.weekday() < 5:
-                    d += 1
-            px = _fetch_close_at(code, target)
-            if px:
-                rec[key] = round(px, 2)
-                # 原始 return（理論值）
-                rec[f"t{t}_return_pct"] = round((px - entry) / entry * 100, 2)
-                # 實戰 return（含 slippage）
-                px_realistic = px * SLIPPAGE_EXIT
-                rec[f"t{t}_return_realistic_pct"] = round(
-                    (px_realistic - entry_realistic) / entry_realistic * 100, 2
-                )
-                updated += 1
-
-        # 更新區間最高/最低
-        if days_elapsed >= 1:
-            end_check = min(today, snap_date + timedelta(days=int(20 * 1.5)))  # 20 交易日 ≈ 28 自然日
-            rng = _fetch_price_range(code, snap_date, end_check)
-            if rng:
-                rec["max_gain_pct"] = round((rng["high"] - entry) / entry * 100, 2)
-                rec["max_drawdown_pct"] = round((rng["low"] - entry) / entry * 100, 2)
-
-        # T+20 完成 → 標記
-        if days_elapsed >= 20 and rec.get("t20_price") is not None:
-            rec["status"] = "completed"
-
+        before = json.dumps(rec, sort_keys=True, ensure_ascii=False)
+        compute_outcomes(rec, b, taiex)
+        if json.dumps(rec, sort_keys=True, ensure_ascii=False) != before:
+            updated += 1
     return updated
 
 
@@ -331,8 +373,8 @@ def _notify_changes(prev_date: str | None, prev: list[dict],
             lines.append(f"  {p['code']} {p['name'][:8]}  {old:+d} → {p['score']:+d} (+{delta})")
         lines.append("")
 
-    lines.append("⏰ 24h 訊號保鮮期")
-    lines.append("超過 24 小時請重跑確認")
+    lines.append("📏 規則：大盤多方＋個股⬆多頭才上榜")
+    lines.append("回測 20 日：平均 +2.5%、上漲率約五成（不保證會漲，務必設停損）")
 
     body = "\n".join(lines)
 
@@ -347,7 +389,30 @@ def _notify_changes(prev_date: str | None, prev: list[dict],
 
 # ---------- 主流程 ----------
 
+def _summary(records: list[dict]) -> None:
+    ok = [r for r in records if is_ok(r)]
+    print(f"📈 推薦追蹤狀態（只算乾淨紀錄 {len(ok)}/{len(records)} 筆）")
+    for label, rows in (("全部", ok),
+                        ("舊規則 v1", [r for r in ok if r.get("rule_version", 1) == 1]),
+                        ("新規則 v2", [r for r in ok if r.get("rule_version", 1) == 2])):
+        if not rows:
+            continue
+        print(f"  ── {label}（{len(rows)} 筆）")
+        for t in (5, 10, 20):
+            real = [r[f"t{t}_return_realistic_pct"] for r in rows if r.get(f"t{t}_return_realistic_pct") is not None]
+            exc = [r[f"t{t}_excess_pct"] for r in rows if r.get(f"t{t}_excess_pct") is not None]
+            if real:
+                print(f"     T+{t:<2d} 隔日開盤買、扣成本：平均 {sum(real)/len(real):+.2f}%  "
+                      f"勝率 {sum(1 for v in real if v > 0)/len(real)*100:.0f}%  (n={len(real)})"
+                      + (f"  ｜贏大盤 {sum(exc)/len(exc):+.2f}%" if exc else ""))
+
+
 def main():
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
     args = sys.argv[1:]
     no_snap = "--no-snap" in args
     show_status = "--status" in args
@@ -355,43 +420,33 @@ def main():
     records = load_history()
 
     if show_status:
-        total = len(records)
-        tracking = sum(1 for r in records if r.get("status") == "tracking")
-        completed = sum(1 for r in records if r.get("status") == "completed")
-        print(f"📈 推薦追蹤狀態")
-        print(f"  總筆數: {total}")
-        print(f"  追蹤中: {tracking}")
-        print(f"  已完成: {completed}")
-        if completed > 0:
-            done = [r for r in records if r.get("status") == "completed"]
-            avg = sum(r.get("t20_return_pct", 0) for r in done) / len(done)
-            wins = sum(1 for r in done if r.get("t20_return_pct", 0) > 0)
-            print(f"  T+20 平均報酬: {avg:+.2f}%")
-            print(f"  T+20 勝率: {wins / len(done) * 100:.0f}%")
+        _summary(records)
         return
 
     # 1) snapshot 當日推薦 + 偵測變動
     if not no_snap:
-        # 同日不重複 snapshot（避免重跑造成重複資料）
-        today = date.today().isoformat()
-        existing_today = sum(1 for r in records if r.get("snapshot_date") == today)
-        if existing_today > 0:
-            print(f"今日已 snapshot {existing_today} 筆，跳過新增")
+        new_records, info = snapshot_today(top_n=10)
+        data_date = info["data_date"]
+        existing = sum(1 for r in records if r.get("snapshot_date") == data_date)
+        print(f"資料日 {data_date}｜大盤 {info.get('market_text')}（{info.get('market_side')}）"
+              f"｜官方補 K {info.get('patched_bars')} 檔｜算分 {info.get('n_scored')} 檔、"
+              f"多頭結構 {info.get('n_trend_ok')} 檔 → 上榜 {len(new_records)} 檔")
+        if info["gate_blocked"]:
+            print("⛔ 大盤在空方 → 今日不推薦（回測：空方時推薦 20 日平均 -1.9%、上漲率 40%）")
+        elif existing > 0:
+            print(f"資料日 {data_date} 已 snapshot {existing} 筆，跳過新增（假日或重跑）")
+            info["n_picks"] = existing
+        elif new_records:
+            prev_dates = sorted({r["snapshot_date"] for r in records}, reverse=True)
+            prev_date = prev_dates[0] if prev_dates else None
+            prev_records = [r for r in records if r.get("snapshot_date") == prev_date] if prev_date else []
+            records.extend(new_records)
+            print(f"✅ 新增 {len(new_records)} 筆推薦 snapshot")
+            _notify_changes(prev_date, prev_records, data_date, new_records)
         else:
-            new_records = snapshot_today(top_n=10)
-            if new_records:
-                # 找上一個 snapshot 日（最近的不同日期）
-                prev_dates = sorted({r["snapshot_date"] for r in records}, reverse=True)
-                prev_date = prev_dates[0] if prev_dates else None
-                prev_records = [r for r in records if r.get("snapshot_date") == prev_date] if prev_date else []
-
-                records.extend(new_records)
-                print(f"✅ 新增 {len(new_records)} 筆推薦 snapshot")
-
-                # 變動偵測 + Telegram 推播
-                _notify_changes(prev_date, prev_records, today, new_records)
-            else:
-                print("ℹ️ 今日推薦榜 0 檔（沒新增）")
+            print("ℹ️ 今日推薦榜 0 檔（沒新增）")
+        info["run_at_utc"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        LAST_RUN_FILE.write_text(json.dumps(info, ensure_ascii=False, indent=1), encoding="utf-8")
 
     # 2) 更新 T+N 表現
     n_updated = update_records(records)

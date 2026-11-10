@@ -216,6 +216,11 @@ def fetch_market_regime_cached() -> dict:
     """市場狀態（多頭/警戒/熊市），12 小時快取"""
     try:
         taiex = yf.Ticker("^TWII").history(period="2y", auto_adjust=False)
+        try:
+            from market_data import patch_index_bar
+            taiex = patch_index_bar(taiex.dropna(subset=["Close"]))  # yfinance 缺當天時用官方收盤補
+        except Exception:
+            pass
         return detect_market_regime(taiex)
     except Exception as e:
         return {"regime": "unknown", "emoji": "⚪", "label": "判斷失敗",
@@ -259,6 +264,18 @@ def fetch_top_picks_cached(portfolio_codes_tuple: tuple, _instit_by_code: dict) 
     # 1) 優先讀檔（recs_history.jsonl 排程已算好）
     hist_file = _P("data/recs_history.jsonl")
     today_iso = _dt.date.today().isoformat()
+    # 11/11：排程每次會寫 recs_last_run.json（資料日／大盤閘門），以它為準
+    #   - 閘門擋住 → 直接空榜
+    #   - 否則顯示「資料日」那天的推薦（雲端主機是 UTC，用 date.today() 會對不到）
+    try:
+        _last_run = _json.loads(_P("data/recs_last_run.json").read_text(encoding="utf-8"))
+        if _last_run.get("gate_blocked"):
+            return [], f"{_last_run.get('data_date', '')}（大盤空方，推薦暫停）"
+        _age = (_dt.date.today() - _dt.date.fromisoformat(_last_run["data_date"])).days
+        if 0 <= _age <= 4:
+            today_iso = _last_run["data_date"]
+    except Exception:
+        pass
     if hist_file.exists():
         try:
             today_picks = []
@@ -778,6 +795,40 @@ macro_score, macro_notes = macro_risk_score(all_macro)
 macro_emo, macro_label = macro_verdict(macro_score)
 market_regime = fetch_market_regime_cached()
 
+# ──────────────── 大盤趨勢箭頭（11/11：全站方向判斷的單一來源）────────────────
+_mt = market_regime.get("trend")
+if _mt and _mt.get("t") is not None:
+    _chk = "　".join(f"{'✅' if ok else '❌'} {name}" for name, ok in _mt["checks"])
+    _side_txt = "多方" if _mt["side"] == "long" else "空方"
+    _side_color = "#1b7f3b" if _mt["side"] == "long" else "#b71c1c"
+    st.markdown(
+        f"<div style='background:{_mt['bg']}; border-left:6px solid {_mt['color']}; "
+        f"padding:10px 16px; border-radius:6px; margin:8px 0; color:#1a1a1a;'>"
+        f"<span style='font-size:14px; color:#666'>🧭 大盤趨勢</span> &nbsp;"
+        f"<span style='font-size:24px; font-weight:800; color:{_mt['color']}'>{_mt['arrow']} {_mt['label']}</span> &nbsp;"
+        f"<span style='font-size:14px; font-weight:700; color:{_side_color}'>【{_side_txt}】</span>"
+        f"<span style='font-size:12px; color:#555'> {_mt['side_since']} 起，第 {_mt['side_days']} 個交易日"
+        f"｜結構 {_mt['t']}/5</span><br>"
+        f"<span style='font-size:12px; color:#444'>{_chk}</span><br>"
+        f"<span style='font-size:12px; color:#555'>📊 {market_regime.get('stat_text', '')}</span><br>"
+        f"<span style='font-size:13px; color:#1a1a1a'><b>👉 {market_regime.get('advice', '')}</b></span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    with st.expander("這個箭頭怎麼算的、準不準？", expanded=False):
+        st.markdown(
+            "**算法**：5 個均線結構條件成立幾個（收盤>20MA、20MA>60MA、收盤>60MA、60MA 上揚、收盤>120MA）。"
+            "5 ⬆ 多頭｜4 ↗ 偏多｜3、2 → 盤整｜1 ↘ 偏空｜0 ⬇ 空頭。\n\n"
+            "**多空方**：掉到 1 以下轉空方，要回到 3 以上才翻回多方（避免天天翻）。\n\n"
+            "**準度（2003～2026 回測，誠實版）**：箭頭往下**不代表一定會跌**——空方之後 20 天上漲機率仍有 57%（多方 61%）。"
+            "差別在：空方平均報酬只有 +0.3%（多方 +1.1%）、最差情境 -11.9%（多方 -6.3%），"
+            "而且歷史上 55% 的「20 天內大跌超過 10%」都發生在空方（空方只佔 27% 的時間）。"
+            "只在多方持有：年化 11.1%、最大回撤 -26%（一直抱：9.7%、-58%）。\n\n"
+            "**對個股的影響最大**：大盤空方時，系統推薦股 20 天平均 **-1.9%**、上漲率 40%；多方時 **+1.8%**。"
+            "所以空方期間推薦榜直接暫停。\n\n"
+            "數字來源：`data/trend_stats.json`（`py -3 trend_backtest.py` 可重算）。"
+        )
+
 # 市況翻盤偵測 → 桌面通知（跨 session 持久化）
 import json as _json
 def _load_last_regime() -> str | None:
@@ -861,6 +912,7 @@ for _, r in agg.iterrows():
             "現價": None, "漲跌%": None,
             "投資成本": int(buy_total(r["cost"], r["shares"])),
             "帳面收入": None, "損益": None, "損益%": None,
+            "趨勢": (score_data.get("trend") or {}).get("text", ""),
             "主力評分": score_data["score"], "建議": score_data["verdict_emoji"],
             "訊號": "⚠ 無報價",
         })
@@ -928,6 +980,7 @@ for _, r in agg.iterrows():
         "帳面收入": int(market_val),
         "損益": int(pnl),
         "損益%": round(pnl_pct, 2),
+        "趨勢": (score_data.get("trend") or {}).get("text", ""),
         "主力評分": score_data["score"],
         "建議": score_data["verdict_emoji"],
         "訊號": " ".join(e for e, _ in sigs) if sigs else "",
@@ -1169,7 +1222,7 @@ idx_text = (
 )
 regime_bg_color = {"bull": "#e6f4ea", "warning": "#fff8e1",
                    "bear": "#fde7e9", "unknown": "#f5f5f5"}.get(market_regime["regime"], "#f5f5f5")
-regime_dev = f" ({market_regime['deviation']:+.1f}% vs 200MA)" if "deviation" in market_regime else ""
+regime_dev = ""  # 11/11：市況改用趨勢結構，label 已含箭頭，不再顯示 vs 200MA
 
 mini_html = f"""
 <div style='background:#f0f2f6; padding:8px 14px; border-radius:8px;
@@ -1199,18 +1252,18 @@ st.subheader("🎯 加碼 / 減碼建議")
 
 def _regime_banner(context: str = "") -> None:
     """根據市況顯示警告。context 用於補上區段名（例如「推薦標的」）"""
+    _t = market_regime.get("trend") or {}
     if market_regime["regime"] == "bear":
         st.error(
-            f"🔴 **熊市模式** — TAIEX {market_regime['last']:,.0f} 跌破 200MA "
-            f"({market_regime['ma200']:,.0f}, {market_regime['deviation']:+.1f}%)。\n\n"
-            f"**回測證實**：本系統在 2022 熊市，期望值 −2.04%/筆、勝率 37.5%、連敗 11 次。"
-            f"{('**請忽略下方' + context + '**，' ) if context else ''}建議空手或減碼。"
+            f"🔴 **大盤空方**（{_t.get('arrow', '')} {_t.get('label', '')}，{_t.get('side_since', '')} 起）"
+            f" — TAIEX {market_regime['last']:,.0f}。\n\n"
+            f"**回測（2020～2026、流動性前 300 大）**：大盤空方時，本系統推薦股之後 20 日平均 −1.9%、上漲率 40%；"
+            f"多方時 +1.8%。{('**' + context + '暫停**，') if context else ''}不加碼、守停損，等結構回到 3/5 以上。"
         )
     elif market_regime["regime"] == "warning":
         st.warning(
-            f"🟡 **警戒模式** — TAIEX {market_regime['last']:,.0f} 在 200MA "
-            f"({market_regime['ma200']:,.0f}) 附近震盪 ({market_regime['deviation']:+.1f}%)。"
-            f"建議**減半部位**謹慎進場。"
+            f"🟡 **大盤多方但結構轉弱**（{_t.get('arrow', '')} {_t.get('label', '')}，結構 {_t.get('t', '?')}/5）"
+            f" — TAIEX {market_regime['last']:,.0f}。新部位**減半**，只挑個股本身是 ⬆ 多頭的。"
         )
 
 
@@ -1386,15 +1439,17 @@ with _hdr_r:
         st.rerun()
 
 st.caption(
-    "**已強化**：法人金額前 100 → 跑系統評分（**過熱保護**：距 60MA < +30%、30 日 < +40%、60 日新高 > +3%）→ "
-    "**強制 2 年回測，剔除負期望值** → 取前 5。"
+    "**11/11 新規則**：大盤多方才推 → 法人金額前 200 → **個股必須 ⬆ 多頭（結構 5/5）** → 系統評分 ≥3"
+    "（KD／K 線／乖離已不計分）→ 過熱保護（距 60MA < +30%、30 日 < +40%）→ 依評分、離 60 日高點遠近排序取前 5。"
+    "回測 20 日：舊規則平均 +1.3%、上漲率 45% → 新規則 +2.5%、50%。**上漲率只有五成，進場一定要設停損。** "
+    "個股 2 年回測 EV 改為只顯示、不當門檻（實盤驗證它沒有預測力）。"
     "排除 ETF / 金融 / 電信 / 你已持有 / 30 天內賣出 / 單日漲幅 > 9.5% 的標的。"
 )
 
 _regime_banner("推薦標的")
 
 if market_regime["regime"] == "bear":
-    st.caption("熊市模式下不執行推薦計算（省資源 + 避免誤導）")
+    st.caption("大盤空方 → 推薦榜暫停（回測：這時候照推薦買，20 日平均 -1.9%）")
     top_picks_data = []
     _calc_time = ""
 else:
@@ -2042,7 +2097,7 @@ with tab_hot:
 with tab_recs:
     st.caption(
         "📈 系統推薦的真實表現追蹤。"
-        "每日 14:35 自動 snapshot 推薦榜，追蹤 T+1/T+5/T+10/T+20 報酬。"
+        "每個交易日盤後自動 snapshot 推薦榜，追蹤 T+1/T+5/T+10/T+20 報酬。"
         "**用途**：量化系統真實 alpha vs 大盤。"
     )
     import json as _json
@@ -2059,6 +2114,13 @@ with tab_recs:
                     _recs.append(_json.loads(_line))
                 except Exception:
                     pass
+        _n_all = len(_recs)
+        _recs = [r for r in _recs if r.get("quality", "ok") == "ok"]
+        if _n_all != len(_recs):
+            st.caption(
+                f"🧹 11/11 量尺修正：{_n_all} 筆中有 {_n_all - len(_recs)} 筆被排除"
+                "（當時拿到的是前一天股價，或假日重複快照）。下面只算乾淨的。"
+            )
         if not _recs:
             st.info("追蹤資料是空的")
         else:
@@ -2069,43 +2131,50 @@ with tab_recs:
             _c1.metric("總追蹤", len(_recs))
             _c2.metric("追蹤中", len(_tracking))
             _c3.metric("已完成 (T+20)", len(_completed))
-            # 整體 T+1 平均
-            _t1_valid = [r["t1_return_pct"] for r in _recs if r.get("t1_return_pct") is not None]
-            if _t1_valid:
-                _c4.metric("T+1 平均", f"{sum(_t1_valid)/len(_t1_valid):+.1f}%")
+            # 整體 T+20（隔日開盤買、扣成本）
+            _t20_valid = [r["t20_return_realistic_pct"] for r in _recs
+                          if r.get("t20_return_realistic_pct") is not None]
+            if _t20_valid:
+                _c4.metric("T+20 平均（實際可得）", f"{sum(_t20_valid)/len(_t20_valid):+.1f}%")
 
             # 各時間框架表現
             st.markdown("##### 📊 各時間框架平均表現")
             _stats = []
-            for _t in [1, 5, 10, 20]:
-                _key = f"t{_t}_return_pct"
-                _valid = [r[_key] for r in _recs if r.get(_key) is not None]
-                if _valid:
-                    _avg = sum(_valid) / len(_valid)
-                    _wr = sum(1 for v in _valid if v > 0) / len(_valid) * 100
-                    _best = max(_valid)
-                    _worst = min(_valid)
+            def _avg_of(_rows, _k):
+                _v = [r[_k] for r in _rows if r.get(_k) is not None]
+                return (round(sum(_v) / len(_v), 2) if _v else None)
+
+            for _ver_label, _rows in (
+                ("舊規則", [r for r in _recs if r.get("rule_version", 1) == 1]),
+                ("新規則(11/11起)", [r for r in _recs if r.get("rule_version", 1) == 2]),
+            ):
+                for _t in [1, 5, 10, 20]:
+                    _key = f"t{_t}_return_realistic_pct"
+                    _valid = [r[_key] for r in _rows if r.get(_key) is not None]
+                    if not _valid:
+                        continue
                     _stats.append({
+                        "規則": _ver_label,
                         "時間框架": f"T+{_t}",
                         "樣本": len(_valid),
-                        "平均報酬%": round(_avg, 2),
-                        "勝率%": round(_wr, 0),
-                        "最佳%": round(_best, 2),
-                        "最差%": round(_worst, 2),
+                        "平均報酬%": round(sum(_valid) / len(_valid), 2),
+                        "勝率%": round(sum(1 for v in _valid if v > 0) / len(_valid) * 100, 0),
+                        "贏大盤%": _avg_of(_rows, f"t{_t}_excess_pct"),
+                        "最佳%": round(max(_valid), 2),
+                        "最差%": round(min(_valid), 2),
                     })
-                else:
-                    _stats.append({"時間框架": f"T+{_t}", "樣本": 0,
-                                  "平均報酬%": None, "勝率%": None,
-                                  "最佳%": None, "最差%": None})
-            _stats_df = pd.DataFrame(_stats)
+            st.caption("報酬＝**隔日開盤買進**、T+N 收盤賣出、扣來回成本 0.585%（實際做得到的數字）。"
+                       "「贏大盤」＝同期間比加權指數多（少）賺多少。")
+            _stats_df = pd.DataFrame(_stats) if _stats else pd.DataFrame(
+                columns=["規則", "時間框架", "樣本", "平均報酬%", "勝率%", "贏大盤%", "最佳%", "最差%"])
             _stats_styled = _stats_df.style.format({
-                "平均報酬%": "{:+.2f}", "勝率%": "{:.0f}",
+                "平均報酬%": "{:+.2f}", "勝率%": "{:.0f}", "贏大盤%": "{:+.2f}",
                 "最佳%": "{:+.2f}", "最差%": "{:+.2f}",
             }, na_rep="-")
             try:
-                _stats_styled = _stats_styled.map(color_pnl, subset=["平均報酬%", "最佳%", "最差%"])
+                _stats_styled = _stats_styled.map(color_pnl, subset=["平均報酬%", "贏大盤%", "最佳%", "最差%"])
             except AttributeError:
-                _stats_styled = _stats_styled.applymap(color_pnl, subset=["平均報酬%", "最佳%", "最差%"])
+                _stats_styled = _stats_styled.applymap(color_pnl, subset=["平均報酬%", "贏大盤%", "最佳%", "最差%"])
             st.dataframe(_stats_styled, use_container_width=True, hide_index=True)
 
             # 最近 20 筆明細
@@ -2428,7 +2497,7 @@ else:
 
 # 熊市時：把加碼類建議改為暫停（不影響減碼）
 if market_regime["regime"] == "bear" and combined >= 3:
-    final_verdict = f"⚠️ 熊市暫停加碼建議（系統評分 {combined:+d}）"
+    final_verdict = f"⚠️ 大盤空方，暫停加碼（系統評分 {combined:+d}）"
     final_emo = "🔴"
 elif market_regime["regime"] == "warning" and combined >= 3:
     final_verdict = f"🟡 警戒：減半部位（系統評分 {combined:+d}）"

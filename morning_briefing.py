@@ -121,6 +121,11 @@ def main():
     # 市況
     try:
         taiex = yf.Ticker("^TWII").history(period="2y", auto_adjust=False)
+        try:
+            from market_data import patch_index_bar
+            taiex = patch_index_bar(taiex.dropna(subset=["Close"]))
+        except Exception:
+            pass
         regime = detect_market_regime(taiex)
     except Exception:
         regime = {"emoji": "⚪", "label": "判斷失敗"}
@@ -199,7 +204,7 @@ def main():
     # 通知（Windows Toast + Telegram）
     title = f"☀️ 晨間摘要 {today.strftime('%m/%d')}"
     # 市況一行 + 台指期狀態
-    regime_line = f"市況 {regime.get('label', '')}（{regime.get('emoji', '')} 200MA 長期）"
+    regime_line = f"市況 {regime.get('emoji', '')} {regime.get('label', '')}"
     if txf:
         verdict = txf["verdict"]
         verdict_emo = {

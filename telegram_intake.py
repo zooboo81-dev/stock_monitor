@@ -206,7 +206,7 @@ def build_plan(txns: list[dict], applied: set):
             else:  # 全新個股
                 stop = round(price * STOP_RATIO)
                 new_row = {
-                    "code": code, "name": name, "market": "TSE",
+                    "code": code, "name": name, "market": _detect_market(code),
                     "shares": str(shares), "cost": f"{price}",
                     "category": t.get("category", "待分類"), "stop_loss": str(stop),
                     "entry_date": t["date"], "hold_type": DEFAULT_HOLD_TYPE,
@@ -240,6 +240,22 @@ def build_plan(txns: list[dict], applied: set):
         "summary": " / ".join(f"{t['action']}{t['name']}{t['shares']}股" for t in fresh),
     }
     return plan, "\n".join(lines)
+
+
+def _detect_market(code: str) -> str:
+    """新持股是上市(TSE)還是上櫃(OTC)。
+    2026-11-11：以前一律寫 TSE，穩懋 3105／欣銓 3264 這種上櫃股就抓不到報價，
+    儀表板把它們的市值當 0，未實現損益少算約 67 萬。
+    判斷方式：看櫃買中心當日行情表裡有沒有這個代號；查不到時維持 TSE。
+    """
+    try:
+        import requests
+        r = requests.get("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes", timeout=15)
+        if any(str(x.get("SecuritiesCompanyCode", "")).strip() == code for x in r.json()):
+            return "OTC"
+    except Exception:
+        pass
+    return "TSE"
 
 
 FIELDS = ["code", "name", "market", "shares", "cost", "category", "stop_loss", "entry_date", "hold_type"]

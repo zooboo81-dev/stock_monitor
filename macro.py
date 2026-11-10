@@ -114,50 +114,55 @@ def fetch_night() -> dict:
 
 
 def detect_market_regime(taiex_hist) -> dict:
-    """市場狀態判斷：TAIEX vs 200 日均線
-    根據回測證實：
-      - 多頭（>200MA）：系統訊號可信，期望值 +1.1%/筆
-      - 警戒（±2% 內）：方向未明，減半部位
-      - 熊市（<200MA）：系統訊號失效，期望值 -2%/筆，建議空手
-    """
-    import pandas as pd
-    if taiex_hist is None or len(taiex_hist) < 200:
-        return {"regime": "unknown", "emoji": "⚪", "label": "資料不足"}
+    """市場狀態判斷 —— 2026-11-11 改用 trend.py 的趨勢結構（跟箭頭同一個來源）
 
+    舊版只看「收盤 vs 200MA ±2%」，問題：
+      - 2026/10/29~11/4 大盤從高點跌 14%，它還顯示「🟢 多頭模式、訊號可信」
+        （同時間另一個橫幅說「跌破 60MA 中期空頭」，兩個打架）
+      - 跌破 200MA 才叫熊市，通常已經跌 15~20%，來不及
+
+    新版（回測 2003~2026，data/trend_stats.json）：
+      bear    = 空方（T<=1 起算，回到 T>=3 才解除）
+                之後 20 日平均 +0.3%（多方 +1.1%）、最差 5% 情境 -11.9%（多方 -6.3%）
+                過去「20 日內跌超過 10%」的日子有 55% 發生在空方
+      warning = 多方但結構不完整（T<=3）
+      bull    = 多方且 T>=4
+    回傳鍵維持舊版相容（regime/emoji/label/last/ma200/deviation/advice/banner_type），
+    另外多給 trend（完整趨勢狀態）。
+    """
+    from trend import stat_sentence, trend_state
+
+    if taiex_hist is None or len(taiex_hist) < 141:
+        return {"regime": "unknown", "emoji": "⚪", "label": "資料不足"}
     h = taiex_hist.dropna(subset=["Close"])
-    if len(h) < 200:
+    st = trend_state(h, "index")
+    if st.get("t") is None:
         return {"regime": "unknown", "emoji": "⚪", "label": "資料不足"}
 
     last = float(h["Close"].iloc[-1])
-    ma200 = float(h["Close"].rolling(200).mean().iloc[-1])
-    deviation = (last - ma200) / ma200 * 100
+    ma200 = float(h["Close"].rolling(200).mean().iloc[-1]) if len(h) >= 200 else float("nan")
+    deviation = (last - ma200) / ma200 * 100 if ma200 == ma200 else 0.0
+    base = {"last": last, "ma200": ma200, "deviation": deviation, "trend": st,
+            "arrow": st["arrow"], "trend_label": st["label"], "stat_text": stat_sentence(st, "index")}
 
-    if deviation > 2.0:
-        return {
-            "regime": "bull",
-            "emoji": "🟢",
-            "label": "多頭模式",
-            "last": last, "ma200": ma200, "deviation": deviation,
-            "advice": "系統訊號可信，可參考加碼建議榜",
-            "banner_type": None,
-        }
-    if deviation < -2.0:
-        return {
-            "regime": "bear",
-            "emoji": "🔴",
-            "label": "熊市模式",
-            "last": last, "ma200": ma200, "deviation": deviation,
-            "advice": "系統訊號在熊市回測賠錢，建議空手或減碼，**不要照系統加碼**",
-            "banner_type": "error",
-        }
-    return {
-        "regime": "warning",
-        "emoji": "🟡",
-        "label": "警戒模式",
-        "last": last, "ma200": ma200, "deviation": deviation,
-        "advice": "TAIEX 接近 200MA 方向未明，建議**減半部位**謹慎進場",
-        "banner_type": "warning",
-    }
+    if st["side"] == "short":
+        return {**base,
+                "regime": "bear", "emoji": "🔴",
+                "label": f"{st['arrow']} 大盤{st['label']}（空方）",
+                "advice": (f"{st['side_since']} 起轉空方：不加碼個股、不照推薦榜進場、既有部位守停損。"
+                           f"站回 20MA＋60MA 之上（T≥3）才解除"),
+                "banner_type": "error"}
+    if st["t"] <= 3:
+        return {**base,
+                "regime": "warning", "emoji": "🟡",
+                "label": f"{st['arrow']} 大盤{st['label']}（多方但結構轉弱）",
+                "advice": "趨勢結構不完整，新部位**減半**、只挑個股本身是 ⬆ 多頭的",
+                "banner_type": "warning"}
+    return {**base,
+            "regime": "bull", "emoji": "🟢",
+            "label": f"{st['arrow']} 大盤{st['label']}（多方）",
+            "advice": "順勢環境，可參考推薦榜（個股仍要設停損）",
+            "banner_type": None}
 
 
 def macro_risk_score(macro: dict) -> tuple[int, list[tuple[str, str, str]]]:

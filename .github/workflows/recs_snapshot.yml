@@ -35,5 +35,5 @@ jobs:
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add data/recs_history.jsonl data/notifications.jsonl
+          git add data/recs_history.jsonl data/notifications.jsonl data/recs_last_run.json
           git diff --staged --quiet && echo "無變動" || (git commit -m "chore: update recs snapshot" && git push)
