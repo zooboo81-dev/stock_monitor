@@ -2124,57 +2124,123 @@ with tab_recs:
         if not _recs:
             st.info("追蹤資料是空的")
         else:
-            # 統計摘要
-            _completed = [r for r in _recs if r.get("status") == "completed"]
-            _tracking = [r for r in _recs if r.get("status") == "tracking"]
-            _c1, _c2, _c3, _c4 = st.columns(4)
-            _c1.metric("總追蹤", len(_recs))
-            _c2.metric("追蹤中", len(_tracking))
-            _c3.metric("已完成 (T+20)", len(_completed))
-            # 整體 T+20（隔日開盤買、扣成本）
-            _t20_valid = [r["t20_return_realistic_pct"] for r in _recs
-                          if r.get("t20_return_realistic_pct") is not None]
-            if _t20_valid:
-                _c4.metric("T+20 平均（實際可得）", f"{sum(_t20_valid)/len(_t20_valid):+.1f}%")
-
-            # 各時間框架表現
-            st.markdown("##### 📊 各時間框架平均表現")
-            _stats = []
+            # ── 11/11：主指標從「勝率」改成「平均每筆＋賺賠比」──
+            # 理由（同一批 31,573 筆回測訊號，只換停利停損）：勝率可以靠「停利設近、停損放遠」
+            # 從 39% 做到 87%，但平均每筆會從 +1.25% 變成 -0.39%。勝率高 ≠ 賺錢，
+            # 順勢選股 40~50% 是正常長相；要看的是「平均每筆」和「賺的平均 ÷ 賠的平均」。
             def _avg_of(_rows, _k):
                 _v = [r[_k] for r in _rows if r.get(_k) is not None]
                 return (round(sum(_v) / len(_v), 2) if _v else None)
 
-            for _ver_label, _rows in (
-                ("舊規則", [r for r in _recs if r.get("rule_version", 1) == 1]),
-                ("新規則(11/11起)", [r for r in _recs if r.get("rule_version", 1) == 2]),
-            ):
+            def _pl_stats(_vals):
+                """一組報酬 → 平均每筆、賺的平均、賠的平均、賺賠比、勝率、打平需要的賺賠比"""
+                if not _vals:
+                    return None
+                _w = [v for v in _vals if v > 0]
+                _l = [v for v in _vals if v <= 0]
+                _wr = len(_w) / len(_vals)
+                _aw = sum(_w) / len(_w) if _w else 0.0
+                _al = sum(_l) / len(_l) if _l else 0.0
+                return {
+                    "n": len(_vals), "avg": sum(_vals) / len(_vals),
+                    "avg_win": _aw, "avg_loss": _al,
+                    "payoff": (_aw / abs(_al)) if _al < 0 else None,          # 賺賠比
+                    "wr": _wr * 100,
+                    "need": ((1 - _wr) / _wr) if _wr > 0 else None,           # 這個勝率下，賺賠比要多少才打平
+                }
+
+            _rows_v1 = [r for r in _recs if r.get("rule_version", 1) == 1]
+            _rows_v2 = [r for r in _recs if r.get("rule_version", 1) == 2]
+            _k20 = "t20_return_realistic_pct"
+            _s_v1 = _pl_stats([r[_k20] for r in _rows_v1 if r.get(_k20) is not None])
+            _s_v2 = _pl_stats([r[_k20] for r in _rows_v2 if r.get(_k20) is not None])
+            # 新規則滿 20 筆才當主角；不夠就先看舊規則（並說明新規則還在累積）
+            _use_v2 = bool(_s_v2 and _s_v2["n"] >= 20)
+            _hd = _s_v2 if _use_v2 else _s_v1
+            _hd_rows = _rows_v2 if _use_v2 else _rows_v1
+            _hd_label = "新規則" if _use_v2 else "舊規則"
+            _cmp = _s_v1 if _use_v2 else None   # 對照組：新規則當主角時，拿舊規則來比
+
+            _tracking_n = sum(1 for r in _recs if r.get("status") == "tracking")
+            if _hd:
+                _payoff_txt = f"{_hd['payoff']:.2f}" if _hd["payoff"] is not None else "—"
+                _need_txt = f"{_hd['need']:.2f}" if _hd["need"] is not None else "—"
+                _ok_flag = (_hd["payoff"] is not None and _hd["need"] is not None
+                            and _hd["payoff"] >= _hd["need"])
+                _exc20 = _avg_of(_hd_rows, "t20_excess_pct")
+                st.markdown(
+                    f"<div style='background:#f6f8fa; border-left:5px solid "
+                    f"{'#1b7f3b' if _hd['avg'] > 0 else '#b71c1c'}; padding:10px 14px; border-radius:6px; "
+                    f"color:#1a1a1a; font-size:14px; margin:6px 0 10px 0'>"
+                    f"<b>白話重點（{_hd_label}，{_hd['n']} 筆）</b>：每推 1 檔、隔天開盤買、抱 20 個交易日，"
+                    f"平均每筆 <b>{_hd['avg']:+.2f}%</b>。"
+                    f"賺的時候平均賺 {_hd['avg_win']:+.1f}%、賠的時候平均賠 {_hd['avg_loss']:+.1f}%，"
+                    f"賺賠比 <b>{_payoff_txt}</b>；以目前勝率 {_hd['wr']:.0f}% 要 {_need_txt} 以上才打平 → "
+                    f"<b>{'✅ 達標' if _ok_flag else '❌ 未達標'}</b>。"
+                    + (f"同期間{'贏' if (_exc20 or 0) >= 0 else '輸'}大盤 {abs(_exc20):.2f}%。" if _exc20 is not None else "")
+                    + (f"<br><span style='color:#666; font-size:12px'>新規則（11/11 起）目前 "
+                       f"{len(_rows_v2)} 筆、滿 20 筆抱滿 20 天後會自動換成主角。</span>" if not _use_v2 else "")
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+                _c1, _c2, _c3, _c4 = st.columns(4)
+                _c1.metric(
+                    "平均每筆（抱 20 天）", f"{_hd['avg']:+.2f}%",
+                    (f"{_hd['avg'] - _cmp['avg']:+.2f}% 較舊規則" if _cmp else None),
+                    help="隔日開盤買、T+20 收盤賣、扣來回成本 0.585%。這個數字是正的，系統才是賺錢的。",
+                )
+                _c2.metric(
+                    "賺賠比", _payoff_txt,
+                    (f"{_hd['payoff'] - _cmp['payoff']:+.2f} 較舊規則"
+                     if _cmp and _hd["payoff"] is not None and _cmp["payoff"] is not None else None),
+                    help=f"賺的平均 {_hd['avg_win']:+.1f}% ÷ 賠的平均 {_hd['avg_loss']:+.1f}%。越大越好。",
+                )
+                _c3.metric(
+                    "打平需要的賺賠比", _need_txt,
+                    help="＝(1−勝率)÷勝率。賺賠比要高過這個數字才不賠。勝率 40% 需要 1.5、勝率 33% 需要 2.0。",
+                )
+                _c4.metric(
+                    "勝率（參考）", f"{_hd['wr']:.0f}%",
+                    (f"{_hd['wr'] - _cmp['wr']:+.0f}% 較舊規則" if _cmp else None),
+                    help="順勢選股 40~50% 是正常的。硬把勝率做高（停利設近、停損放遠）反而會讓平均每筆變負。",
+                )
+            st.caption(f"乾淨紀錄 {len(_recs)} 筆（舊規則 {len(_rows_v1)}／新規則 {len(_rows_v2)}），"
+                       f"其中 {_tracking_n} 筆還沒抱滿 20 天。")
+
+            # 各時間框架表現
+            st.markdown("##### 📊 各持有天數：平均每筆與賺賠比")
+            _stats = []
+            for _ver_label, _rows in (("舊規則", _rows_v1), ("新規則(11/11起)", _rows_v2)):
                 for _t in [1, 5, 10, 20]:
                     _key = f"t{_t}_return_realistic_pct"
-                    _valid = [r[_key] for r in _rows if r.get(_key) is not None]
-                    if not _valid:
+                    _s = _pl_stats([r[_key] for r in _rows if r.get(_key) is not None])
+                    if not _s:
                         continue
                     _stats.append({
                         "規則": _ver_label,
-                        "時間框架": f"T+{_t}",
-                        "樣本": len(_valid),
-                        "平均報酬%": round(sum(_valid) / len(_valid), 2),
-                        "勝率%": round(sum(1 for v in _valid if v > 0) / len(_valid) * 100, 0),
+                        "持有": f"T+{_t}",
+                        "樣本": _s["n"],
+                        "平均每筆%": round(_s["avg"], 2),
+                        "賺的平均%": round(_s["avg_win"], 2),
+                        "賠的平均%": round(_s["avg_loss"], 2),
+                        "賺賠比": round(_s["payoff"], 2) if _s["payoff"] is not None else None,
+                        "打平需要": round(_s["need"], 2) if _s["need"] is not None else None,
                         "贏大盤%": _avg_of(_rows, f"t{_t}_excess_pct"),
-                        "最佳%": round(max(_valid), 2),
-                        "最差%": round(min(_valid), 2),
+                        "勝率%(參考)": round(_s["wr"], 0),
                     })
             st.caption("報酬＝**隔日開盤買進**、T+N 收盤賣出、扣來回成本 0.585%（實際做得到的數字）。"
-                       "「贏大盤」＝同期間比加權指數多（少）賺多少。")
-            _stats_df = pd.DataFrame(_stats) if _stats else pd.DataFrame(
-                columns=["規則", "時間框架", "樣本", "平均報酬%", "勝率%", "贏大盤%", "最佳%", "最差%"])
+                       "「賺賠比」高過「打平需要」才是賺錢的；「贏大盤」＝同期間比加權指數多（少）賺多少。")
+            _stat_cols = ["規則", "持有", "樣本", "平均每筆%", "賺的平均%", "賠的平均%",
+                          "賺賠比", "打平需要", "贏大盤%", "勝率%(參考)"]
+            _stats_df = pd.DataFrame(_stats, columns=_stat_cols)
             _stats_styled = _stats_df.style.format({
-                "平均報酬%": "{:+.2f}", "勝率%": "{:.0f}", "贏大盤%": "{:+.2f}",
-                "最佳%": "{:+.2f}", "最差%": "{:+.2f}",
+                "平均每筆%": "{:+.2f}", "賺的平均%": "{:+.2f}", "賠的平均%": "{:+.2f}",
+                "賺賠比": "{:.2f}", "打平需要": "{:.2f}", "贏大盤%": "{:+.2f}", "勝率%(參考)": "{:.0f}",
             }, na_rep="-")
             try:
-                _stats_styled = _stats_styled.map(color_pnl, subset=["平均報酬%", "贏大盤%", "最佳%", "最差%"])
+                _stats_styled = _stats_styled.map(color_pnl, subset=["平均每筆%", "贏大盤%"])
             except AttributeError:
-                _stats_styled = _stats_styled.applymap(color_pnl, subset=["平均報酬%", "贏大盤%", "最佳%", "最差%"])
+                _stats_styled = _stats_styled.applymap(color_pnl, subset=["平均每筆%", "贏大盤%"])
             st.dataframe(_stats_styled, use_container_width=True, hide_index=True)
 
             # 最近 20 筆明細
@@ -2189,10 +2255,11 @@ with tab_recs:
                     "評分": r["score"],
                     "EV%": r.get("backtest_ev"),
                     "進場價": r["entry_price"],
-                    "T+1%": r.get("t1_return_pct"),
-                    "T+5%": r.get("t5_return_pct"),
-                    "T+10%": r.get("t10_return_pct"),
-                    "T+20%": r.get("t20_return_pct"),
+                    # 跟上面統計同一把尺：隔日開盤買、扣成本（沒有才退回收盤對收盤）
+                    "T+1%": r.get("t1_return_realistic_pct", r.get("t1_return_pct")),
+                    "T+5%": r.get("t5_return_realistic_pct", r.get("t5_return_pct")),
+                    "T+10%": r.get("t10_return_realistic_pct", r.get("t10_return_pct")),
+                    "T+20%": r.get("t20_return_realistic_pct", r.get("t20_return_pct")),
                     "最大獲利%": r.get("max_gain_pct"),
                     "最大回撤%": r.get("max_drawdown_pct"),
                     "狀態": r["status"],
@@ -2215,10 +2282,10 @@ with tab_recs:
                 )
             st.dataframe(_detail_styled, use_container_width=True, hide_index=True, height=500)
             st.caption(
-                "💡 **怎麼解讀**：① T+1 勝率高 = 隔日跳空效應強"
-                " ② T+20 才是真實能力（噪音洗掉）"
-                " ③ 最大回撤大 = 進場後波動大，需嚴格停損"
-                " ④ 1 個月後可看「系統推薦 vs TAIEX 同期 alpha」"
+                "💡 **怎麼解讀**：① 先看「平均每筆」是不是正的，再看「賺賠比」有沒有高過「打平需要」"
+                " ② 勝率只是參考：順勢選股 40~50% 正常，靠少數大漲的賺回來"
+                " ③ T+20 才是真實能力（T+1 噪音大）"
+                " ④ 最大回撤大 = 進場後波動大，需嚴格停損"
             )
 
 with tab_watch:
