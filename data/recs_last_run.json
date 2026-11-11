@@ -1,0 +1,14 @@
+{
+ "data_date": "2026-11-10",
+ "n_picks": 0,
+ "gate_blocked": true,
+ "market_text": "↘ 偏空",
+ "market_t": 1,
+ "market_side": "short",
+ "market_side_since": "2026-11-06",
+ "patched_bars": 0,
+ "n_scored": 0,
+ "n_trend_ok": 0,
+ "rule_version": 2,
+ "run_at_utc": "2026-11-11 00:18"
+}

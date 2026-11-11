@@ -150,8 +150,9 @@ def snapshot_today(top_n: int = 10) -> tuple[list[dict], dict]:
     run = dict(discover.LAST_RUN)
     mkt = run.get("market") or {}
     # 快照日 = 評分實際用到的最新一根 K 的日期（不是主機的今天）
+    # 閘門擋住時沒抓個股 → 用大盤指數最後一根的日期（不能用今天：盤前跑會寫成還沒開盤的日子）
     data_date = (max((p["data_date"] for p in picks), default=None)
-                 or run.get("data_date") or taiwan_today().isoformat())
+                 or run.get("data_date") or mkt.get("data_date") or taiwan_today().isoformat())
 
     records = []
     for rank, p in enumerate(picks, 1):
