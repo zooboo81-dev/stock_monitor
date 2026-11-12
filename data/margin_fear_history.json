@@ -346,5 +346,17 @@
   "tw_vix": 38.3,
   "us_vix": 19.46,
   "us_vix_date": "2026-11-10"
+ },
+ {
+  "date": "2026-11-12",
+  "taiex": 43091.87,
+  "taiex_pct": -2.63,
+  "maint_ratio": 167.22,
+  "margin_yi": 5334.75,
+  "margin_chg_yi": -76.83,
+  "coverage_pct": 99.71,
+  "tw_vix": 40.28,
+  "us_vix": 17.49,
+  "us_vix_date": "2026-11-11"
  }
 ]
