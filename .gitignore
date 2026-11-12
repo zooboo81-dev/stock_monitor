@@ -94,4 +94,5 @@ data/intake_debug.txt
 tssco_sync/*
 !tssco_sync/sync_bills.py
 !tssco_sync/*.bat
+!tssco_sync/create_task.ps1
 !tssco_sync/requirements.txt
