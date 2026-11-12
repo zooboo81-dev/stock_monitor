@@ -88,3 +88,10 @@ data/telegram_intake_offset.json
 data/telegram_intake_applied.json
 data/telegram_intake_pending.json
 data/intake_debug.txt
+
+# 台新交割憑單自動同步：整個資料夾不上 GitHub（設定檔含 Gmail/PDF 密碼、PDF 與清單含個資）
+# 只保留程式碼本身（sync_bills.py / bat / requirements）方便備份
+tssco_sync/*
+!tssco_sync/sync_bills.py
+!tssco_sync/*.bat
+!tssco_sync/requirements.txt
