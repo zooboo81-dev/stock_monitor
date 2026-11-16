@@ -1,21 +1,21 @@
 {
- "last_date": "2026-11-13",
+ "last_date": "2026-11-16",
  "zones": {
-  "maint": -1,
+  "maint": 0,
   "tw_vix": 1,
   "us_vix": -1
  },
  "latest": {
-  "date": "2026-11-13",
-  "taiex": 43675.12,
-  "taiex_pct": 1.35,
-  "maint_ratio": 170.67,
-  "margin_yi": 5365.99,
-  "margin_chg_yi": 31.24,
-  "coverage_pct": 99.71,
-  "tw_vix": 37.84,
-  "us_vix": 18.7,
-  "us_vix_date": "2026-11-12"
+  "date": "2026-11-16",
+  "taiex": 41040.08,
+  "taiex_pct": -6.03,
+  "maint_ratio": 158.52,
+  "margin_yi": 5244.98,
+  "margin_chg_yi": -121.01,
+  "coverage_pct": 99.94,
+  "tw_vix": 48.85,
+  "us_vix": 19.3,
+  "us_vix_date": "2026-11-13"
  },
- "updated_at": "2026-11-14T04:54:58+08:00"
+ "updated_at": "2026-11-17T07:25:00+08:00"
 }
