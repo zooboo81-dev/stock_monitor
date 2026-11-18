@@ -15,15 +15,29 @@ r"""
   - 股名是全名且會折成 2～3 行（台達電/子、T50正/2），和 CSV 用的簡稱不同，
     所以用「股名對照.txt」轉換；對照表會從既有 CSV 自動學（同日、同交易別、同股數、同價就是同一檔）
   - 集保轉入不是交易，沒有交割憑單，不會從這裡進來
+  - 零股多筆撮合時憑單只印均價，價金和 股數×價 會差 1～2 元，價金與應收付才是真的（check_row 放行）
+  - 每張憑單都拿「小計」列驗算明細加總（價金、手續費、交易稅、應收付），對不上就報錯，防止漏列還顯示失敗 0 筆
+
+融資券（目前只在 2019 的舊版 HTML 憑單出現過）：
+  - HTML 憑單支援 資買／資賣／券賣／券買；PDF 版沒有樣本，遇到一律回報錯誤，不猜欄位
+  - CSV 的 net 存「算實際損益用的淨額」，不是當天現金（現金要扣融資金額、融券保證金，對損益沒意義）：
+      資買 side=買進 lot=融資  net = -(價金＋手續費)
+      資賣 side=賣出 lot=融資  net = 價金－手續費－交易稅－融資利息
+      券賣 side=券賣 lot=融券  net = 價金－手續費－交易稅－融券手續費
+      券買 side=券買 lot=融券  net = -(價金＋手續費－券利息)
+  - 憑單印的應收付不寫進 CSV，只在 check_row 用來交叉驗算上面的淨額
 """
 import csv
 import email
+import email.utils
 import imaplib
 import json
 import re
 import sys
 import urllib.parse
 import urllib.request
+import zipfile
+from html.parser import HTMLParser
 from collections import Counter, defaultdict
 from datetime import datetime
 from email.header import decode_header
@@ -49,6 +63,10 @@ HEADER_COLS = {
     "證所稅": None, "保費": None, "金額": "net",
 }
 SIDE_MAP = {"現買": "買進", "現賣": "賣出"}
+MARGIN_MAP = {"資買": ("買進", "融資"), "資賣": ("賣出", "融資"),  # 只有 HTML 憑單用；類別 → (side, lot)
+              "券賣": ("券賣", "融券"), "券買": ("券買", "融券")}
+SKIP_TYPES = {"預收款", "券差留置款", "券差留置"}  # 憑單上會出現但不是成交的列
+_NUM = r"-?[\d,]+(?:\.\d+)?"  # 憑單上的數字
 
 
 # ───────────────────────── 小工具 ─────────────────────────
@@ -120,6 +138,26 @@ def _int(s):
     return int(round(_num(s)))
 
 
+def subtotal_errors(rows, printed, bill_date):
+    """
+    憑單印的小計 vs 解析出來的明細加總，不符回一列 _error（憑單就不會被標已處理）。
+    printed＝{amount, fee, tax, net}，None＝憑單上讀不到小計。明細已經有錯的憑單不再驗，免得重複報。
+    應收付比的是憑單印的現金：融資券列的 net 是算損益用的淨額，要改用 margin["cash"]。
+    """
+    if not rows or any(r.get("_error") for r in rows):
+        return []
+    if printed is None:
+        return [dict(_error="讀不到小計列，無法確認明細有沒有讀完", date=bill_date, name="憑單小計", side="")]
+    got = {"amount": sum(r["amount"] for r in rows), "fee": sum(r["fee"] for r in rows),
+           "tax": sum(r["tax"] for r in rows),
+           "net": sum(r["margin"]["cash"] if r.get("margin") else r["net"] for r in rows)}
+    labels = {"amount": "價金", "fee": "手續費", "tax": "交易稅", "net": "應收付"}
+    diff = [f"{labels[c]} 明細 {got[c]:,}／小計 {printed[c]:,}" for c in labels if got[c] != printed[c]]
+    if diff:
+        return [dict(_error="明細加總和小計不符（可能漏列）：" + "、".join(diff), date=bill_date, name="憑單小計", side="")]
+    return []
+
+
 # ───────────────────────── PDF 解析 ─────────────────────────
 def open_pdf(data, password):
     doc = fitz.open(stream=data, filetype="pdf")
@@ -134,8 +172,11 @@ def parse_bill(doc, bill_date):
     用文字座標解析交割憑單表格 → list[dict]（欄位同 CSV；解析不了的列帶 _error）。
     每頁：找標題列的欄位中心 x，表格每列以「類別」字（現買/現賣）為錨，
     數字依「最靠近哪個欄位中心」歸欄；股名取類別右邊、數量左邊那一小塊（會折行）。
+    融資券（資買/資賣/券賣/券買）沒有 PDF 樣本，走「不支援的交易類別」回報錯誤，不猜欄位。
+    小計列依序印 價金、手續費、交易稅、應收付，最後拿來驗算明細加總。
+    預收款這類非成交列不入帳，但小計的應收付有算它（2024-12-10 西勝：-54,076＋預收款 54,076＝小計 0），驗算時要扣回來。
     """
-    rows = []
+    rows, printed, other_net = [], None, 0
     for page in doc:
         words = page.get_text("words")  # (x0, y0, x1, y1, text, block, line, word)
         hdr = [w for w in words if w[4] == "類別"]
@@ -163,6 +204,10 @@ def parse_bill(doc, bill_date):
         x_qty = min(x for x, c in cols if c == "shares")  # 股名區右界
         subtotal = [w for w in words if w[4].startswith("小計")]
         y_end = subtotal[0][1] if subtotal else 10 ** 6
+        if subtotal:
+            nums = [w[4] for w in sorted(words, key=lambda w: w[0])
+                    if abs(w[1] - y_end) < 4 and re.fullmatch(_NUM, w[4])]
+            printed = dict(zip(("amount", "fee", "tax", "net"), map(_int, nums))) if len(nums) == 4 else None
 
         anchors = sorted((w for w in words if abs(w[0] - x_type) < 6 and y_hdr + 10 < w[1] < y_end
                           and re.fullmatch(r"[現零融][買賣]|[^\d,.-]{2,4}", w[4])), key=lambda w: w[1])
@@ -174,11 +219,15 @@ def parse_bill(doc, bill_date):
                 (w for w in words if y_lo <= w[1] < y_hi and a[2] < w[0] < x_qty - 8), key=lambda w: (round(w[1]), w[0])))
             side = SIDE_MAP.get(a[4])
             if not side:
+                if a[4] in SKIP_TYPES:  # 不是成交（例如全額交割股的預收款），略過不算錯
+                    other_net += sum(_int(w[4]) for w in words if abs(w[1] - y) < 3 and re.fullmatch(_NUM, w[4])
+                                     and min(cols, key=lambda c: abs(c[0] - (w[0] + w[2]) / 2))[1] == "net")
+                    continue
                 rows.append(dict(_error=f"不支援的交易類別「{a[4]}」", date=bill_date, name=name, side=a[4]))
                 continue
             vals = {}
             for w in words:
-                if abs(w[1] - y) < 3 and re.fullmatch(r"-?[\d,]+(?:\.\d+)?", w[4]):
+                if abs(w[1] - y) < 3 and re.fullmatch(_NUM, w[4]):
                     cx = (w[0] + w[2]) / 2
                     col = min(cols, key=lambda c: abs(c[0] - cx))[1]
                     if col and col not in vals:
@@ -191,7 +240,163 @@ def parse_bill(doc, bill_date):
                                  fee=_int(vals["fee"]), tax=_int(vals["tax"]), net=_int(vals["net"])))
             except (KeyError, ValueError) as e:
                 rows.append(dict(_error=f"數字欄位對不上（{name} {side}）：{vals}", date=bill_date, name=name, side=side))
-    return rows
+    if printed:
+        printed["net"] -= other_net
+    return rows + subtotal_errors(rows, printed, bill_date)
+
+
+class _TableRows(HTMLParser):
+    """把 HTML 裡所有表格列抓成 [[cell, cell, ...], ...]"""
+    def __init__(self):
+        super().__init__()
+        self.rows, self._row, self._cell, self._in_cell = [], None, [], False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "tr":
+            self._row = []
+        elif tag in ("td", "th"):
+            self._cell, self._in_cell = [], True
+        elif tag == "br" and self._in_cell:
+            self._cell.append("/")
+
+    def handle_endtag(self, tag):
+        if tag in ("td", "th") and self._row is not None:
+            self._row.append(re.sub(r"\s+", " ", "".join(self._cell)).replace("\xa0", " ").strip())
+            self._in_cell = False
+        elif tag == "tr" and self._row is not None:
+            self.rows.append(self._row)
+            self._row = None
+
+    def handle_data(self, data):
+        if self._in_cell:
+            self._cell.append(data)
+
+
+HTML_COLS = {"數量": "shares", "成交價": "price", "價金": "amount", "手續費": "fee", "交易稅": "tax", "應收付": "net"}
+# 融資券才用到的欄（標題比對前先拿掉 _TableRows 由 <br> 變來的 /，例如「融資//券利息」→「融資券利息」）
+HTML_MARGIN_COLS = {"融資金額": "loan", "融資自備款": "deposit", "融券手續費": "margin_fee", "融資券利息": "interest"}
+
+
+def margin_net(side, amount, fee, tax, margin_fee, interest):
+    """融資券列存進 CSV 的淨額（算實際損益用，不是當天現金）。"""
+    return {"買進": -(amount + fee),
+            "賣出": amount - fee - tax - interest,
+            "券賣": amount - fee - tax - margin_fee,
+            "券買": -(amount + fee - interest)}[side]
+
+
+def parse_bill_html(html, bill_date):
+    """2019～2024-02 的舊版憑單：ZIP 裡的 HTML 表格，欄位和 PDF 一樣，另支援融資券。
+    表格讀到「小計」才算結束：空列跳過、類別空白但有內容的列報錯，最後用小計驗算明細加總。"""
+    tp = _TableRows()
+    tp.feed(html)
+    rows, idx, sub, other_net = [], None, None, 0
+    for cells in tp.rows:
+        if idx is None:
+            if "類別" in cells and "股票" in cells:
+                idx = {}
+                for i, c in enumerate(cells):
+                    for label, col in HTML_COLS.items():
+                        if c.startswith(label):
+                            idx[col] = i
+                    for label, col in HTML_MARGIN_COLS.items():
+                        if c.replace("/", "").replace(" ", "").startswith(label):
+                            idx[col] = i
+                if not {"shares", "price", "amount", "fee", "tax", "net"} <= set(idx):
+                    rows.append(dict(_error=f"HTML 表頭缺欄位：{cells}", date=bill_date, name="", side=""))
+                    return rows
+            continue
+        if not any(cells):  # 排版用的空列，後面可能還有成交
+            continue
+        if cells[0].startswith("小計"):
+            sub = cells
+            break
+        kind, name = cells[0].replace(" ", ""), cells[1].replace(" ", "") if len(cells) > 1 else ""
+        if kind in MARGIN_MAP:
+            rows.append(_margin_row(cells, idx, kind, name, bill_date))
+            continue
+        side = SIDE_MAP.get(kind)
+        if not side:
+            if kind in SKIP_TYPES:  # 不入帳，但小計的應收付有算它
+                other_net += _int(cells[idx["net"]]) if idx["net"] < len(cells) and cells[idx["net"]] else 0
+                continue
+            rows.append(dict(_error=f"不支援的交易類別「{kind or '空白'}」：{cells}", date=bill_date, name=name, side=kind))
+            continue
+        try:
+            shares = _int(cells[idx["shares"]])
+            rows.append(dict(date=bill_date, bill_name=name, name=name, side=side,
+                             lot="零股" if shares < 1000 else "現股", shares=shares,
+                             price=_num(cells[idx["price"]]), amount=_int(cells[idx["amount"]]),
+                             fee=_int(cells[idx["fee"]]), tax=_int(cells[idx["tax"]]), net=_int(cells[idx["net"]])))
+        except (IndexError, ValueError) as e:
+            rows.append(dict(_error=f"數字欄位對不上（{name} {side}）：{cells}", date=bill_date, name=name, side=side))
+    try:
+        printed = {c: _int(sub[idx[c]]) for c in ("amount", "fee", "tax", "net")} if sub else None
+    except (IndexError, ValueError):
+        printed = None
+    if printed:
+        printed["net"] -= other_net
+    return rows + subtotal_errors(rows, printed, bill_date)
+
+
+def _margin_row(cells, idx, kind, name, bill_date):
+    """HTML 憑單的一列融資券 → CSV 列；憑單原始金額放 margin，給 check_row 交叉驗算。"""
+    side, lot = MARGIN_MAP[kind]
+    missing = set(HTML_MARGIN_COLS.values()) - set(idx)
+    if missing:
+        return dict(_error=f"HTML 表頭缺融資券欄位 {missing}", date=bill_date, name=name, side=side)
+    try:
+        amount, fee, tax = (_int(cells[idx[c]]) for c in ("amount", "fee", "tax"))
+        extra = {c: _int(cells[idx[c]]) if cells[idx[c]] else 0 for c in HTML_MARGIN_COLS.values()}  # 空白 = 0
+        return dict(date=bill_date, bill_name=name, name=name, side=side, lot=lot,
+                    shares=_int(cells[idx["shares"]]), price=_num(cells[idx["price"]]),
+                    amount=amount, fee=fee, tax=tax,
+                    net=margin_net(side, amount, fee, tax, extra["margin_fee"], extra["interest"]),
+                    margin=dict(extra, cash=_int(cells[idx["net"]])))
+    except (IndexError, ValueError):
+        return dict(_error=f"數字欄位對不上（{name} {side}）：{cells}", date=bill_date, name=name, side=side)
+
+
+def resolve_name(bill_name, mapping, csv_names):
+    """
+    憑單股名 → CSV 股名，只接受完全相同的對應，回傳 (名稱, 是否有解析到)。
+    不用「開頭相同」來猜：台塑／台塑石化、中鋼／中鋼結構是不同公司，併錯會污染帳本。
+    對不上的名稱照憑單原名入帳並提醒。之後要改名，股名對照.txt 和 CSV 舊列要一起改（見 split_names）。
+    """
+    if bill_name in mapping:
+        return mapping[bill_name], True
+    if bill_name in csv_names:
+        return bill_name, True
+    return bill_name, False
+
+
+def split_names(csv_rows, mapping):
+    """CSV 還留著對照表已改掉的舊名 → {舊名: 新名}。同一檔變兩個名字，先進先出會配不到買進，損益和持股都會錯。"""
+    names = {r["name"] for r in csv_rows}
+    return {k: v for k, v in mapping.items() if k in names and k != v}
+
+
+def check_margin(r):
+    """融資券列：淨額照公式，再用憑單印的應收付反推，確認每個欄位都讀對。"""
+    m = r.get("margin")
+    if not m:
+        return "融資券列缺憑單明細"
+    side, net = r["side"], r["net"]
+    expect = margin_net(side, r["amount"], r["fee"], r["tax"], m["margin_fee"], m["interest"])
+    if net != expect:
+        return f"淨額 {net} ≠ 推算 {expect}"
+    if side in ("買進", "券買") and r["tax"] != 0:
+        return f"{side}不應有交易稅"
+    if side == "券賣" and m["loan"] != net:  # 券賣的擔保品 = 賣出淨額
+        return f"融券擔保品 {m['loan']} ≠ 淨額 {net}"
+    cash = {"買進": net + m["loan"],                # 融資買：券商借出融資金額，自付其餘
+            "賣出": net - m["loan"],                # 融資賣：先還融資金額
+            "券賣": -m["deposit"],                  # 融券賣：當天只繳保證金
+            "券買": net + m["loan"] + m["deposit"],  # 融券買：退回擔保品與保證金
+            }[side]
+    if m["cash"] != cash:
+        return f"應收付 {m['cash']} ≠ 推算 {cash}"
+    return None
 
 
 def check_row(r):
@@ -204,8 +409,12 @@ def check_row(r):
         return "股名是空的"
     if r["shares"] <= 0 or r["price"] <= 0:
         return "股數或成交價不是正數"
-    if abs(r["amount"] - r["shares"] * r["price"]) > 1:
+    # 零股多筆撮合只印均價，容許 0.1% 的尾差；整股維持 1 元
+    tolerance = max(1, r["amount"] * 0.001) if r["shares"] < 1000 else 1
+    if abs(r["amount"] - r["shares"] * r["price"]) > tolerance:
         return f"價金 {r['amount']} ≠ 股數×價 {r['shares'] * r['price']:.0f}"
+    if r.get("lot") in ("融資", "融券"):
+        return check_margin(r)
     expect = -(r["amount"] + r["fee"]) if r["side"] == "買進" else r["amount"] - r["fee"] - r["tax"]
     if r["net"] != expect:
         return f"應收付 {r['net']} ≠ 推算 {expect}"
@@ -265,7 +474,7 @@ def load_name_map():
 
 
 def save_name_map(mapping):
-    lines = ["# 憑單上的股名=CSV 用的股名（程式會自動從既有 CSV 學；新股票可以自己加一行）"]
+    lines = ["# 憑單上的股名=CSV 用的股名（程式會自動從既有 CSV 學；已入帳的股票要改名，CSV 舊列要一起改）"]
     lines += [f"{k}={v}" for k, v in sorted(mapping.items())]
     NAME_MAP_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -299,15 +508,41 @@ def all_mail_folder(M):
     return "INBOX"
 
 
+def safe_name(fname, data):
+    """附件檔名來自信件，不可信：只留檔名本身、去掉 Windows 非法字元、副檔名固定 .pdf／.zip。"""
+    name = re.sub(r'[<>:"|?*\x00-\x1f]', "_", re.split(r"[/\\]", fname)[-1]).strip(" .")[-100:]
+    ext = ".pdf" if data[:4] == b"%PDF" else ".zip"
+    return name if name.lower().endswith(ext) else f"{name or 'bill'}{ext}"
+
+
 def fetch_pdfs(msg):
-    pdfs = []
+    """取出信裡的憑單附件：(安全檔名, 內容)。PDF 直接給；ZIP 原樣給（解壓在 parse_attachment）。"""
+    out = []
     for part in msg.walk():
         fname = decode_str(part.get_filename())
-        if fname.lower().endswith(".pdf") or part.get_content_type() == "application/pdf":
-            data = part.get_payload(decode=True)
-            if data and data[:4] == b"%PDF":
-                pdfs.append((fname or "bill.pdf", data))
-    return pdfs
+        low = fname.lower()
+        data = part.get_payload(decode=True) if (low.endswith((".pdf", ".zip")) or part.get_content_type() == "application/pdf") else None
+        if data and (data[:4] == b"%PDF" or data[:2] == b"PK"):
+            out.append((safe_name(fname, data), data))
+    return out
+
+
+def parse_attachment(fname, data, password, bill_date):
+    """PDF → 座標解析；ZIP（舊版，2019～2024-02）→ 解壓 HTML 再解析表格。"""
+    if data[:4] == b"%PDF":
+        return parse_bill(open_pdf(data, password), bill_date)
+    if data[:2] == b"PK":
+        import io
+        zf = zipfile.ZipFile(io.BytesIO(data))
+        rows = []
+        for info in zf.infolist():
+            if info.filename.lower().endswith((".html", ".htm")):
+                html = zf.read(info, pwd=password.encode()).decode("utf-8", errors="replace")
+                rows += parse_bill_html(html, bill_date)
+            elif info.filename.lower().endswith(".pdf"):
+                rows += parse_bill(open_pdf(zf.read(info, pwd=password.encode()), password), bill_date)
+        return rows
+    raise ValueError(f"看不懂的附件：{fname}")
 
 
 # ───────────────────────── 主流程 ─────────────────────────
@@ -350,6 +585,7 @@ def main():
 
     added, errors, monthly_new = [], [], []
     pending = []  # (bill_date, stem, rows)
+    failed_stems = set()  # 有附件讀不了的日期：就算同日別的附件成功，也不標已處理
     try:
         M = imaplib.IMAP4_SSL("imap.gmail.com")
         M.login(user, pwd)
@@ -360,21 +596,32 @@ def main():
         log(f"[Gmail] {since} 起共 {len(ids)} 封台新證券信件")
         mails = []
         for mid in ids:
-            typ, hd = M.fetch(mid, "(BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
-            subject = decode_str(email.message_from_bytes(hd[0][1]).get("Subject")).replace("\r\n", "")
-            mails.append((mid, subject))
+            typ, hd = M.fetch(mid, "(BODY.PEEK[HEADER.FIELDS (SUBJECT DATE)])")
+            h = email.message_from_bytes(hd[0][1])
+            subject = decode_str(h.get("Subject")).replace("\r\n", "")
+            try:
+                sent = email.utils.parsedate_to_datetime(h.get("Date"))
+            except Exception:
+                sent = None
+            mails.append((mid, subject, sent))
 
-        bills = [(m, sub) for m, sub in mails if "交割憑單" in sub]
-        monthlies = [(m, sub) for m, sub in mails if "月對帳單" in sub]
+        bills = [(m, sub) for m, sub, _ in mails if "交割憑單" in sub]
+        # 月對帳單：新格式「電子月對帳單-YYYY年MM月」、2019～2020 舊格式「台新綜合證券 (8月) 對帳單」
+        monthlies = [(m, sub, d) for m, sub, d in mails if "對帳單" in sub and "交割憑單" not in sub]
         log(f"  交割憑單 {len(bills)} 封、月對帳單 {len(monthlies)} 封")
 
         # ── 月對帳單：只下載 ──
-        for mid, subject in monthlies:
-            key = "monthly:" + re.sub(r"\D", "", subject)[-6:]
+        for mid, subject, sent in monthlies:
+            if "月對帳單" in subject or not sent:   # 新格式：主旨裡的 年月
+                key = "monthly:" + re.sub(r"\D", "", subject)[-6:]
+            else:                                   # 舊格式：用寄信年月
+                key = f"monthly-old:{sent:%Y%m}"
             if key in done:
                 continue
             msg = email.message_from_bytes(M.fetch(mid, "(BODY.PEEK[])")[1][0][1])
             for fname, pdf in fetch_pdfs(msg):
+                if "月對帳單" not in subject and sent:  # 舊格式檔名沒年份，前面加寄信年月
+                    fname = f"{sent:%Y%m}_{fname}"
                 if test_mode:
                     log(f"  [測試] 會下載月對帳單：{fname}")
                 else:
@@ -386,7 +633,7 @@ def main():
 
         # ── 交割憑單：下載＋解析 ──
         for mid, subject in bills:
-            m = re.search(r"(\d{4})\.(\d{1,2})\.(\d{1,2})", subject)
+            m = re.search(r"(\d{4})[./](\d{1,2})[./](\d{1,2})", subject)  # 新「2026.11.6」、舊「2019/3/4」
             if not m:
                 log(f"  ⚠ 主旨看不出日期，略過：{subject}")
                 continue
@@ -401,17 +648,21 @@ def main():
             pdfs = fetch_pdfs(msg)
             if not pdfs:
                 errors.append(f"{bill_date} 信裡沒有 PDF 附件")
+                failed_stems.add(stem)
                 continue
             for fname, pdf in pdfs:
-                BILL_DIR.mkdir(exist_ok=True)
-                (BILL_DIR / fname).write_bytes(pdf)  # 原始加密檔留底，方便事後核對
+                if not test_mode:
+                    BILL_DIR.mkdir(exist_ok=True)
+                    (BILL_DIR / fname).write_bytes(pdf)  # 原始加密檔留底，方便事後核對
                 try:
-                    rows = parse_bill(open_pdf(pdf, pdf_pw), bill_date)
+                    rows = parse_attachment(fname, pdf, pdf_pw, bill_date)
                 except Exception as e:
-                    errors.append(f"{bill_date} PDF 解密失敗：{e}")
+                    errors.append(f"{bill_date} 附件解密／解析失敗：{e}")
+                    failed_stems.add(stem)
                     continue
                 if not rows:
                     errors.append(f"{bill_date} 解析不到任何成交（憑單格式可能變了）")
+                    failed_stems.add(stem)
                     continue
                 pending.append((bill_date, stem, rows))
         M.logout()
@@ -427,18 +678,26 @@ def main():
     if learned and not test_mode:
         save_name_map(name_map)
         log(f"  股名對照新學到 {learned} 個（股名對照.txt）")
+    csv_names = {r["name"] for r in csv_rows}
     unknown = set()
     for r in all_rows:
-        if not r.get("_error"):
-            if r["bill_name"] in name_map:
-                r["name"] = name_map[r["bill_name"]]
-            else:
-                unknown.add(r["bill_name"])
+        if r.get("_error"):
+            continue
+        r["name"], ok = resolve_name(r["bill_name"], name_map, csv_names)
+        if not ok:
+            unknown.add(r["bill_name"])
     if unknown:
-        log(f"  ℹ 新股票（CSV 沒出現過），先用憑單股名，可到 股名對照.txt 改：{'、'.join(sorted(unknown))}")
+        log(f"  ℹ 新股票（CSV 沒出現過），先用憑單股名入帳：{'、'.join(sorted(unknown))}")
+        log("    之後要改名：股名對照.txt 和 CSV 舊列要一起改，只改對照會把同一檔拆成兩個名字、損益算錯")
+    errors += [f"CSV 還有舊股名「{old}」，對照表已改成「{new}」：同一檔變兩個名字、損益會錯，請把 CSV 舊列改名"
+               for old, new in sorted(split_names(csv_rows, name_map).items())]
 
     # ── 依日期排序後檢查、去重、寫入 ──
-    pending.sort()
+    pending.sort(key=lambda p: p[0])
+    # 同一天有內容不同的憑單（例如更正版）：分不出哪份才對，先不入帳，等人工確認
+    conflict = {b[0] for a, b in zip(pending, pending[1:]) if a[0] == b[0] and a[2] != b[2]}
+    errors += [f"{d} 同一天有內容不同的憑單，未入帳，請人工確認" for d in sorted(conflict)]
+    pending = [p for p in pending if p[0] not in conflict]
     for bill_date, stem, rows in pending:
         good, bad = [], []
         for r in rows:
@@ -467,7 +726,7 @@ def main():
                 append_csv(csv_path, [fmt_row(r, label) for r in to_add])
                 for r in to_add:
                     existing[row_key(r)] += 1
-            if not bad:  # 有錯的憑單不標已處理，下次會再試
+            if not bad and stem not in failed_stems:  # 有錯的憑單不標已處理，下次會再試
                 mark_done(stem)
 
     # ── 收尾 ──
@@ -489,5 +748,8 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as e:
-        log(f"❌ 執行錯誤：{e!r}")
+        detail = f"{type(e).__name__}: {e}"  # 不用 repr：編碼錯誤的 repr 會帶出整串密碼
+        log(f"❌ 執行錯誤：{detail}")
+        if not {"--test", "--dump"} & set(sys.argv):
+            pushover(load_settings(), f"交割憑單同步中斷，這次沒有跑完：{detail}")
         sys.exit(1)
