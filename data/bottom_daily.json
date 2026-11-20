@@ -1226,12 +1226,20 @@
   "limit_up": 4,
   "down_count": 1058,
   "limit_down": 179,
-  "taiex": 36033.2891,
+  "taiex": 36033.29,
   "fut_foreign_net": -97863,
   "mxf_inst_net": 565,
   "mtx_oi": 31483,
   "retail_ratio": -1.79,
   "pc_oi_ratio": 30.05,
-  "foreign_spot_yi": -94.13
+  "foreign_spot_yi": -94.13,
+  "taiex_pct": -6.23,
+  "maint_ratio": 140.4,
+  "margin_yi": 4352.27,
+  "margin_chg_yi": -491.41,
+  "tw_vix": 52.13,
+  "us_vix": 28.44,
+  "us_vix_date": "2026-11-19",
+  "usdtwd": 32.959
  }
 }
