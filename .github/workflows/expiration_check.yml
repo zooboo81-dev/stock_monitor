@@ -36,4 +36,4 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add data/expiration_checks.json data/notifications.jsonl
-          git diff --staged --quiet && echo "無變動" || (git commit -m "chore: T+10 expiration check" && git push)
+          git diff --staged --quiet && echo "無變動" || (git commit -m "chore: T+10 expiration check" && git pull --rebase --autostash && git push)

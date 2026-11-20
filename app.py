@@ -741,7 +741,17 @@ def _read_taiex_ma_state():
 
 
 _ma_state = _read_taiex_ma_state()
-if _ma_state:
+
+# 11/20：升級成「📉 抄底雷達」（見底計分卡 8 項＋跌幅階梯＋均線燈號），
+# 計分卡檔不在或區塊出錯 → 退回下面原本的一行燈號
+_radar_ok = False
+try:
+    import bottom_radar_view as _brv
+    _radar_ok = _brv.render(st, _ma_state, fetch_index(), has_txf=bool(_txf))
+except Exception as _radar_err:
+    st.caption(f"⚠️ 抄底雷達顯示失敗，先用舊版燈號：{_radar_err}")
+
+if _ma_state and not _radar_ok:
     # 雲端無 TXF 時，TAIEX MA 就是進場閘門
     _ma_gate_hint = "" if _txf else " ｜ <b style='color:#1976d2'>此為進場閘門（雲端無 TXF）</b>"
     st.markdown(

@@ -1,11 +1,13 @@
 {
- "as_of": "2026-11-19",
- "generated_at": "2026-11-20T14:03:28+08:00",
- "score": 1.0,
+ "as_of": "2026-11-20",
+ "generated_at": "2026-11-20T15:14:21+08:00",
+ "score": 2.0,
  "max": 8,
  "available": 8,
  "threshold": 4,
  "reached": false,
+ "active": true,
+ "active_gate_pct": -10,
  "verdict": "未達 4 分門檻：資料包規則＝維持小部位、照跌幅分批",
  "indicators": [
   {
@@ -32,48 +34,48 @@
    "id": "foreign_futures_net_short",
    "name": "外資台指期淨空單",
    "core": true,
-   "value": "-99,219 口",
-   "as_of": "2026-11-19",
+   "value": "-97,863 口",
+   "as_of": "2026-11-20",
    "lit": "no",
-   "rule": "自最大淨空單回補 ≥20,000 口完全符合、≥10,000 口初步",
-   "detail": "本波最大淨空 -104,271 口（11/11），已回補 5,052 口"
+   "rule": "自本波最大淨空單回補 ≥20% 完全符合、≥10% 初步",
+   "detail": "本波最大淨空 -104,271 口（11/11），已回補 6,408 口（完全符合要 20,854 口）"
   },
   {
    "id": "retail_mtx_long_short",
    "name": "小台散戶多空比",
    "core": true,
-   "value": "+6.29%",
-   "as_of": "2026-11-19",
-   "lit": "no",
+   "value": "-1.79%",
+   "as_of": "2026-11-20",
+   "lit": "yes",
    "rule": "≤0% 完全符合（散戶轉偏空、多單被洗出）、≤5% 初步",
-   "detail": "前一日 +16.37%；近 10 日最高 +18.30%（11/09）"
+   "detail": "前一日 +6.29%；近 10 日最高 +18.30%（11/09）"
   },
   {
    "id": "pc_oi_ratio",
    "name": "P/C 未平倉比",
    "core": true,
-   "value": "41.0%",
-   "as_of": "2026-11-19",
+   "value": "30.1%",
+   "as_of": "2026-11-20",
    "lit": "no",
    "rule": "先跌到 ≤60%、再回到 ≥80% 完全符合；自低點回升 ≥15 點初步",
-   "detail": "近 20 日低點 39.7%（11/06）"
+   "detail": "近 20 日低點 30.1%（11/20）"
   },
   {
    "id": "twd",
    "name": "新台幣",
    "core": true,
-   "value": "32.930",
+   "value": "32.916",
    "as_of": "2026-11-19",
    "lit": "no",
    "rule": "台幣連 3 天升值完全符合、連 2 天初步（數字是 1 美元兌台幣）",
-   "detail": "連續升值 0 天；近 20 日最弱 33.109（11/06）"
+   "detail": "連續升值 1 天；近 20 日最弱 32.971（11/16）"
   },
   {
    "id": "limit_down_count",
    "name": "上市跌停家數",
    "core": true,
-   "value": "128 家",
-   "as_of": "2026-11-19",
+   "value": "179 家",
+   "as_of": "2026-11-20",
    "lit": "no",
    "rule": "恐慌日（≥100 家）後降到 ≤9 家完全符合、降到 30% 以下初步",
    "detail": "今天就是本波跌停最多的一天"
@@ -82,11 +84,11 @@
    "id": "foreign_spot_net",
    "name": "外資現貨買賣超",
    "core": true,
-   "value": "-243 億",
-   "as_of": "2026-11-19",
+   "value": "-94 億",
+   "as_of": "2026-11-20",
    "lit": "partial",
-   "rule": "連 2 日買超完全符合；轉買或賣超縮到最大日一半內初步",
-   "detail": "賣超縮小到最大賣超日 11/06（-912 億）的一半以內"
+   "rule": "先有 ≥150 億重賣，之後連 2 日買超或賣超連續縮小 3 天完全符合；轉買或賣超縮到最大日一半內初步",
+   "detail": "賣超縮小到最大賣超日 11/09（-901 億）的一半以內"
   },
   {
    "id": "tw_vix",
@@ -111,71 +113,86 @@
  ],
  "score_history": [
   {
-   "date": "2026-10-30",
-   "score": 0.0
-  },
-  {
    "date": "2026-11-02",
-   "score": 0.0
+   "score": 0.0,
+   "active": false
   },
   {
    "date": "2026-11-03",
-   "score": 0.0
+   "score": 0.0,
+   "active": true
   },
   {
    "date": "2026-11-04",
-   "score": 0.5
+   "score": 0.5,
+   "active": true
   },
   {
    "date": "2026-11-05",
-   "score": 0.0
+   "score": 0.0,
+   "active": true
   },
   {
    "date": "2026-11-06",
-   "score": 0.0
+   "score": 0.0,
+   "active": true
   },
   {
    "date": "2026-11-09",
-   "score": 0.5
+   "score": 1.0,
+   "active": true
   },
   {
    "date": "2026-11-10",
-   "score": 2.0
+   "score": 2.5,
+   "active": true
   },
   {
    "date": "2026-11-11",
-   "score": 2.0
+   "score": 2.5,
+   "active": true
   },
   {
    "date": "2026-11-12",
-   "score": 2.0
+   "score": 2.5,
+   "active": true
   },
   {
    "date": "2026-11-13",
-   "score": 2.0
+   "score": 2.5,
+   "active": true
   },
   {
    "date": "2026-11-16",
-   "score": 1.5
+   "score": 1.5,
+   "active": true
   },
   {
    "date": "2026-11-17",
-   "score": 0.5
+   "score": 0.5,
+   "active": true
   },
   {
    "date": "2026-11-18",
-   "score": 0.5
+   "score": 0.5,
+   "active": true
   },
   {
    "date": "2026-11-19",
-   "score": 1.0
+   "score": 1.0,
+   "active": true
+  },
+  {
+   "date": "2026-11-20",
+   "score": 2.0,
+   "active": true
   }
  ],
  "taiex": {
-  "date": "2026-11-19",
-  "close": 38426.890625,
+  "date": "2026-11-20",
+  "close": 36033.2891,
   "peak": 49822.55078125,
-  "dist_peak_pct": -22.8724944378773,
+  "dist_peak_pct": -27.676747707665317,
   "peak_note": "近 120 個交易日收盤最高（與空頭彈藥梯同一個基準）"
  },
  "tranches_pct": [

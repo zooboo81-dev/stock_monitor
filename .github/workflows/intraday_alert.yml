@@ -47,4 +47,4 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add data/intraday_state.json data/notifications.jsonl
-          git diff --staged --quiet && echo "無變動" || (git commit -m "chore: intraday alert" && git push)
+          git diff --staged --quiet && echo "無變動" || (git commit -m "chore: intraday alert" && git pull --rebase --autostash && git push)

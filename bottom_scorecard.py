@@ -56,7 +56,8 @@ POLICY_FILE = DATA / "bottom_policy.json"
 BEAR_POLICY_FILE = DATA / "bear_trigger_policy.json"
 TAIEX_STATE_FILE = DATA / "taiex_ma_state.json"
 BACKTEST_SUMMARY_FILE = DATA / "bottom_backtest_summary.json"
-BACKTEST_DAILY_FILE = BASE / "data_export" / "bottom_backtest_daily.json"
+BACKTEST_DAILY_FILE = Path(os.environ.get("BOTTOM_BT_FILE") or BASE / "data_export" / "bottom_backtest_daily.json")
+# 回測時可以分段平行補（每段寫自己的檔），replay 會把 data_export/bottom_backtest_daily*.json 全部合併
 
 TW_TZ = timezone(timedelta(hours=8))
 KEEP_DAYS = 180
@@ -99,6 +100,10 @@ def _slash_iso(s: str) -> str:
 
 def _md(iso: str | None) -> str:
     return f"{iso[5:7]}/{iso[8:10]}" if iso else "--/--"
+
+
+def _pct_txt(x) -> str:
+    return "—" if x is None else f"{x:+.1f}%"
 
 
 def load_policy() -> dict:
@@ -155,16 +160,21 @@ def fetch_taifex(sess, a: date, b: date) -> dict[str, dict]:
     """外資台指期淨未平倉、三大法人小台淨未平倉、小台未沖銷量（→散戶多空比）、P/C 未平倉比"""
     out: dict[str, dict] = {}
     num = mfg._num
+
+    def _placeholder(r: dict) -> bool:
+        # 11/20 實測：當天資料還沒公布前，期交所會先回一列多空未平倉都是 0 的空殼，不能當成真的 0 口
+        return not num(r.get("多方未平倉口數")) and not num(r.get("空方未平倉口數"))
+
     for x, y in _chunks(a, b):
         for r in _taifex_range(sess, "futContractsDateDown", {"commodityId": "TXF"}, x, y):
-            if str(r.get("身份別", "")).startswith("外資"):
+            if str(r.get("身份別", "")).startswith("外資") and not _placeholder(r):
                 v = num(r.get("多空未平倉口數淨額"))
                 if v is not None:
                     merge(out, _slash_iso(r["日期"]), {"fut_foreign_net": int(v)})
         inst: dict[str, float] = {}
         for r in _taifex_range(sess, "futContractsDateDown", {"commodityId": "MXF"}, x, y):
             v = num(r.get("多空未平倉口數淨額"))
-            if v is not None and r.get("日期", "")[:1].isdigit():
+            if v is not None and r.get("日期", "")[:1].isdigit() and not _placeholder(r):
                 d = _slash_iso(r["日期"])
                 inst[d] = inst.get(d, 0) + v
         oi: dict[str, float] = {}
@@ -223,6 +233,44 @@ def fetch_yf(symbol: str, a: date, b: date) -> dict[str, float]:
         return {}
 
 
+def fetch_usdtwd_16(a: date, b: date, official: bool = False) -> dict[str, float]:
+    """美元兌台幣『台北 16:00』匯率 → {YYYY-MM-DD: 匯率}
+
+    注意：yfinance 的 TWD=X『日線收盤』其實是 00:00 UTC（台北早上 8 點、開盤前）的報價，
+    拿來判斷「台幣連續升值」會晚一天、方向還可能顛倒（11/20 審查時實測證實），所以不用日線：
+      - official=True：央行 BP01D01（台灣時間 16:00 銀行間即期匯率，官方；但資料會晚好幾週）→ 回測用
+      - 其餘日期：yfinance 1 小時線 07:00–08:00 UTC 那根的收盤（= 台北 16:00），只有近 730 天
+    """
+    out: dict[str, float] = {}
+    if official:
+        try:
+            j = mfg._session().get("https://cpx.cbc.gov.tw/API/DataAPI/Get?FileName=BP01D01", timeout=60).json()
+            for r in j["data"]["dataSets"]:
+                d = f"{r[0][:4]}-{r[0][4:6]}-{r[0][6:8]}"
+                v = mfg._num(r[1])
+                if v and a.isoformat() <= d <= b.isoformat():
+                    out[d] = v
+        except Exception as e:  # noqa: BLE001
+            print(f"  ⚠️ 央行匯率抓取失敗：{e}")
+    start = max(a, datetime.now(TW_TZ).date() - timedelta(days=720))
+    if out:
+        start = max(start, _d(max(out)) + timedelta(days=1))
+    if start <= b:
+        try:
+            import yfinance as yf
+            h = yf.Ticker("TWD=X").history(start=start.isoformat(), end=(b + timedelta(days=1)).isoformat(),
+                                           interval="1h").dropna(subset=["Close"])
+            idx = h.index.tz_convert("UTC") if h.index.tz is not None else h.index.tz_localize("UTC")
+            now_utc = datetime.now(timezone.utc)
+            for ts, v in zip(idx, h["Close"]):
+                # 07:00–08:00 UTC 這根收在台北 16:00；還沒收完（下午 3 點多跑）就不收，免得拿盤中價計分
+                if ts.hour == 7 and ts.to_pydatetime() + timedelta(hours=1) <= now_utc:
+                    out.setdefault(ts.strftime("%Y-%m-%d"), round(float(v), 4))
+        except Exception as e:  # noqa: BLE001
+            print(f"  ⚠️ yfinance TWD=X 1 小時線抓取失敗：{e}")
+    return out
+
+
 def _attach_us_vix(daily: dict, us: dict[str, float]) -> None:
     """台灣某日晚上看到的是前一個美國交易日的收盤"""
     us_dates = sorted(us)
@@ -237,6 +285,11 @@ def _attach_us_vix(daily: dict, us: dict[str, float]) -> None:
 # ---------------------------------------------------------------- 每日更新（正式）
 def update_daily(sess, daily: dict, start: date, end: date, twse_days: int = 12) -> None:
     s_iso, e_iso = start.isoformat(), end.isoformat()
+    # 0) 清掉之前存進來的期交所空殼（外資、法人小台淨未平倉都剛好是 0 = 當天還沒公布）
+    for rec in daily.values():
+        if rec.get("fut_foreign_net") == 0 and rec.get("mxf_inst_net") in (0, None):
+            for k in ("fut_foreign_net", "mxf_inst_net", "mtx_oi", "retail_ratio"):
+                rec.pop(k, None)
     # 1) 融資維持率／融資增減／跌停家數／VIX ← margin_fear_history（官方自算）
     for r in mfg.load_history():
         if s_iso <= r["date"] <= e_iso:
@@ -260,9 +313,9 @@ def update_daily(sess, daily: dict, start: date, end: date, twse_days: int = 12)
                 merge(daily, d, {"foreign_spot_yi": v})
         if daily[d].get("limit_down") is None:
             merge(daily, d, fetch_breadth(sess, ymd))
-    # 4) 新台幣、加權指數（官方收盤沒有時才用 yfinance）
+    # 4) 新台幣（台北 16:00，見 fetch_usdtwd_16）、加權指數（官方收盤沒有時才用 yfinance）
     trading_set = set(trading)
-    for d, v in fetch_yf("TWD=X", start, end).items():
+    for d, v in fetch_usdtwd_16(start, end).items():
         if d in trading_set:
             merge(daily, d, {"usdtwd": v})
     tw = fetch_yf("^TWII", start, end)
@@ -348,14 +401,18 @@ def r_fut(daily, upto, p):
     d, v = s[-1]
     pk_d, pk = min(s, key=lambda t: t[1])
     covered = v - pk
-    yes_c, part_c, min_s = p.get("yes_cover", 20000), p.get("partial_cover", 10000), p.get("min_short", 30000)
+    min_s = p.get("min_short", 20000)
+    # 回補門檻跟著空單規模走（資料包原本固定 2 萬口；本波最大 10.4 萬口 × 2 成 ≈ 2.1 萬口，等於一樣）
+    yes_r, part_r = p.get("yes_cover_ratio", 0.2), p.get("partial_cover_ratio", 0.1)
+    yes_c, part_c = abs(pk) * yes_r, abs(pk) * part_r
     if pk > -min_s:
         lit, det = "no", f"近 {len(s)} 日最大淨空單 {pk:,.0f} 口，沒有重壓空（門檻 {min_s:,} 口）"
     else:
         lit = "yes" if covered >= yes_c else "partial" if covered >= part_c else "no"
-        det = f"本波最大淨空 {pk:,.0f} 口（{_md(pk_d)}），已回補 {covered:,.0f} 口"
+        det = (f"本波最大淨空 {pk:,.0f} 口（{_md(pk_d)}），已回補 {covered:,.0f} 口"
+               f"（完全符合要 {yes_c:,.0f} 口）")
     return {"value": f"{v:,.0f} 口", "as_of": d, "lit": lit,
-            "rule": f"自最大淨空單回補 ≥{yes_c:,} 口完全符合、≥{part_c:,} 口初步", "detail": det}
+            "rule": f"自本波最大淨空單回補 ≥{yes_r:.0%} 完全符合、≥{part_r:.0%} 初步", "detail": det}
 
 
 def r_retail(daily, upto, p):
@@ -434,16 +491,36 @@ def r_spot(daily, upto, p):
     d, v = s[-1]
     n, ratio, heavy = int(p.get("yes_buy_days", 2)), p.get("partial_shrink_ratio", 0.5), p.get("heavy_sell_yi", 150)
     ms_d, ms = min(s, key=lambda t: t[1])
-    if len(s) >= n and all(x >= 0 for _, x in s[-n:]):
-        lit, det = "yes", f"連 {n} 日買超"
+    if ms > -heavy:
+        lit, det = "no", f"近 {len(s)} 日沒有重賣（最大賣超 {min(ms, 0):,.0f} 億，門檻 {heavy:g} 億），談不上止賣"
+    elif len(s) >= n and all(x >= 0 for _, x in s[-n:]):
+        lit, det = "yes", f"重賣（{_md(ms_d)} {ms:,.0f} 億）後連 {n} 日買超"
+    elif _shrink_days(s) >= int(p.get("yes_shrink_days", 3)) and ms_d != d and v >= ms * ratio:
+        # 11/20 第二輪審查：連續縮小還要「已經縮到最大賣超日的一半以內」才算，
+        # 不然 11/09 賣 901 億（只比前一天少 1%）也會拿滿分
+        lit, det = "yes", f"重賣（{_md(ms_d)} {ms:,.0f} 億）後，賣超連續縮小 {_shrink_days(s)} 天、已縮到一半以內"
     elif v >= 0:
-        lit, det = "partial", "轉買超第 1 天"
-    elif ms <= -heavy and ms_d != d and v >= ms * ratio:
+        lit, det = "partial", f"重賣（{_md(ms_d)} {ms:,.0f} 億）後轉買超第 1 天"
+    elif ms_d != d and v >= ms * ratio:
         lit, det = "partial", f"賣超縮小到最大賣超日 {_md(ms_d)}（{ms:,.0f} 億）的一半以內"
     else:
         lit, det = "no", (f"近 {len(s)} 日最大賣超 {ms:,.0f} 億（{_md(ms_d)}）" if ms < 0 else "")
     return {"value": f"{v:+,.0f} 億", "as_of": d, "lit": lit,
-            "rule": f"連 {n} 日買超完全符合；轉買或賣超縮到最大日一半內初步", "detail": det}
+            "rule": (f"先有 ≥{heavy:g} 億重賣，之後連 {n} 日買超或賣超連續縮小 {p.get('yes_shrink_days', 3)} 天"
+                     f"完全符合；轉買或賣超縮到最大日一半內初步"),
+            "detail": det}
+
+
+def _shrink_days(s: list[tuple[str, float]]) -> int:
+    """結尾連續『比前一天賣得少（或轉成買超）』的天數。轉買超也算延續，
+    這樣第一天買超的分數不會反而比前幾天縮小的賣超還低。"""
+    n = 0
+    for i in range(len(s) - 1, 0, -1):
+        if s[i][1] > s[i - 1][1] and s[i - 1][1] < 0:
+            n += 1
+        else:
+            break
+    return n
 
 
 def _r_vix(key: str):
@@ -524,18 +601,37 @@ def build_card(daily: dict, policy: dict, upto: str | None = None) -> dict:
     bear = _read_json(BEAR_POLICY_FILE, {})
     tx_state = _read_json(TAIEX_STATE_FILE, {})
     dates = [d for d in sorted(daily) if d <= upto][-15:]
-    hist = [{"date": d, "score": evaluate(daily, d, policy)["score"]} for d in dates]
-    reached = ev["score"] >= th
+    tx = _taiex_block(daily)
+    gate = policy.get("active_when_drawdown_pct", -10)
+    closes = _ser(daily, "taiex", upto)
+
+    def _active_on(d: str):
+        # 每一天各自判斷是不是「跌勢中」（儀表板小長條才不會用今天的狀態去塗過去的顏色）
+        xs = [x for dd_, x in closes if dd_ <= d][-120:]
+        if not xs:
+            return None
+        pk = max(xs + ([tx["peak"]] if tx.get("peak") and d >= (tx.get("date") or "") else []))
+        return (xs[-1] / pk - 1) * 100 <= gate
+
+    hist = [{"date": d, "score": evaluate(daily, d, policy)["score"], "active": _active_on(d)} for d in dates]
+    active = tx.get("dist_peak_pct") is not None and tx["dist_peak_pct"] <= gate
+    reached = active and ev["score"] >= th
+    if not active:
+        verdict = (f"大盤距高點 {_pct_txt(tx.get('dist_peak_pct'))}，還沒跌超過 {abs(gate):g}%："
+                   "不是抄底情境，分數只供參考")
+    elif reached:
+        verdict = f"已達 {th} 分門檻：資料包規則＝可以放大部位"
+    else:
+        verdict = f"未達 {th} 分門檻：資料包規則＝維持小部位、照跌幅分批"
     return {
         "as_of": upto,
         "generated_at": datetime.now(TW_TZ).isoformat(timespec="seconds"),
         "score": ev["score"], "max": ev["max"], "available": ev["available"],
-        "threshold": th, "reached": reached,
-        "verdict": (f"已達 {th} 分門檻：資料包規則＝可以放大部位" if reached
-                    else f"未達 {th} 分門檻：資料包規則＝維持小部位、照跌幅分批"),
+        "threshold": th, "reached": reached, "active": active, "active_gate_pct": gate,
+        "verdict": verdict,
         "indicators": ev["indicators"],
         "score_history": hist,
-        "taiex": _taiex_block(daily),
+        "taiex": tx,
         "tranches_pct": policy.get("tranche_drawdowns_pct", [25, 30, 35]),
         "bear": {
             "levels": [{"drop_pct": lv.get("drop_pct"), "label": lv.get("label"),
@@ -554,7 +650,13 @@ def summary_line(card: dict | None = None) -> str:
         return ""
     lit = [f"{i['name']}{LIT_MARK[i['lit']]}" for i in card["indicators"]
            if i["core"] and i["lit"] in ("yes", "partial")]
-    return (f"🎯 抄底計分卡 {card['score']:g}/{card['max']}（門檻 {card['threshold']}，資料 {_md(card['as_of'])}）"
+    if card.get("active") is False:
+        # 沒跌深時分數只供參考，不要寫「門檻」讓人誤會成進場訊號
+        dd = (card.get("taiex") or {}).get("dist_peak_pct")
+        return (f"🎯 抄底計分卡 {card['score']:g}/{card['max']}（大盤距高點 {_pct_txt(dd)}，未跌深，只供參考；"
+                f"資料 {_md(card['as_of'])}）")
+    status = f"已達門檻 {card['threshold']}" if card.get("reached") else f"門檻 {card['threshold']}"
+    return (f"🎯 抄底計分卡 {card['score']:g}/{card['max']}（{status}，資料 {_md(card['as_of'])}）"
             f"｜{'、'.join(lit) if lit else '8 項都還沒亮'}")
 
 
@@ -577,8 +679,17 @@ def maybe_push(card: dict, prev: dict, policy: dict, send: bool) -> None:
     prev_lv = prev.get("push_level", 0) if prev else 0
     score = card["score"]
     base = 0 if score < policy.get("push_reset_below", 1.5) else prev_lv
+    if not card.get("active"):
+        # 11/20 審查：不能一沒跌深就歸零，否則大盤在 -10% 上下來回時同一級會重複推。
+        # 只有分數掉回 1.5 以下，或大盤反彈到距高點 -8% 以內（跟空頭彈藥梯同一個重置線）才歸零。
+        reset_above = _read_json(BEAR_POLICY_FILE, {}).get("reset_above_pct", -8)
+        dd = (card.get("taiex") or {}).get("dist_peak_pct")
+        card["push_level"] = 0 if (dd is not None and dd > reset_above) else base
+        print(f"  推播：大盤沒跌深（{card['verdict']}），不推（已推到 {card['push_level']} 分）")
+        return
     crossed = [lv for lv in levels if score >= lv > prev_lv]
-    card["push_level"] = max(crossed) if crossed else base
+    # --quiet／--dry-run 沒真的推，就不能把「已推到幾分」往上記，否則之後雲端會以為推過了
+    card["push_level"] = (max(crossed) if crossed else base) if send else min(base, prev_lv)
     if not crossed:
         print(f"  推播：分數 {score:g}，沒有跨過新門檻（已推到 {prev_lv} 分）")
         return
@@ -608,15 +719,23 @@ def backfill(spec: str) -> None:
         print(f"=== 補 {a} ～ {b} ===")
         for d, f in fetch_taifex(sess, a - timedelta(days=95), b).items():
             merge(bt, d, f)
+        # 已經有的融資維持率（margin_fear_history，同一套算法）直接用，不重抓大表
+        for r in mfg.load_history():
+            if a.isoformat() <= r["date"] <= b.isoformat():
+                merge(bt, r["date"], {k: r.get(k) for k in (
+                    "taiex", "taiex_pct", "maint_ratio", "margin_yi", "margin_chg_yi",
+                    "limit_down", "limit_up", "down_count", "up_count", "tw_vix")})
         _write_json(BACKTEST_DAILY_FILE, bt)
         days = sorted(d for d in bt if a.isoformat() <= d <= b.isoformat() and bt[d].get("fut_foreign_net") is not None)
         print(f"  期交所 {len(days)} 個交易日；開始逐日抓證交所（每天 3 次請求）")
         for i, d in enumerate(days):
             ymd, rec = d.replace("-", ""), bt[d]
-            if rec.get("maint_ratio") is None or rec.get("limit_down") is None:
+            if rec.get("maint_ratio") is None:
                 m = mfg.fetch_margin_day(sess, ymd)
                 if m:
                     merge(bt, d, {k: v for k, v in m.items() if k != "date"})
+            elif rec.get("limit_down") is None:
+                merge(bt, d, fetch_breadth(sess, ymd))
             if rec.get("foreign_spot_yi") is None:
                 v = fetch_foreign_spot(sess, ymd)
                 if v is not None:
@@ -627,7 +746,7 @@ def backfill(spec: str) -> None:
                 print(f"  [{i + 1}/{len(days)}] {d} 維持率 {r.get('maint_ratio')} 跌停 {r.get('limit_down')} "
                       f"外資 {r.get('foreign_spot_yi')} 億", flush=True)
         trading = {d for d in bt if bt[d].get("fut_foreign_net") is not None}
-        for d, v in fetch_yf("TWD=X", a - timedelta(days=60), b).items():
+        for d, v in fetch_usdtwd_16(a - timedelta(days=60), b, official=True).items():
             if d in trading:
                 merge(bt, d, {"usdtwd": v})
         _attach_us_vix(bt, fetch_yf("^VIX", a - timedelta(days=20), b))
@@ -642,14 +761,61 @@ def _fwd(closes: list[tuple[str, float]], d: str, n: int) -> float | None:
     return round((closes[idx + n][1] / closes[idx][1] - 1) * 100, 2)
 
 
+def _conclusion(events: list[dict], th: float) -> str:
+    """回測結論（只寫數字事實，每次重跑自動更新）"""
+    done = [e for e in events if e.get("bottom_date")]
+    if not done:
+        return ""
+    lines = ["**回測結論（數字自動產生）**"]
+    near = 0
+    for e in done:
+        daily = e.get("daily") or []
+        idx = next((i for i, x in enumerate(daily) if x["date"] == e["bottom_date"]), None)
+        # 只看「跌勢中」的日子（跟正式計分卡同一個前提），沒跌深那幾天的分數不算
+        around = [x for x in (daily[max(0, idx - 5): idx + 6] if idx is not None else []) if x.get("active")]
+        best = max(around, key=lambda x: x["score"]) if around else None
+        if best and best["score"] >= th:
+            near += 1
+        f = e.get(f"first_{th:g}")
+        if f:
+            dates = [x["date"] for x in daily]
+            lag = (dates.index(f["date"]) - dates.index(e["bottom_date"])
+                   if f["date"] in dates and e["bottom_date"] in dates else None)
+            when = (f"大底後第 {lag} 個交易日" if lag and lag > 0 else
+                    "大底當天" if lag == 0 else f"大底前 {-lag} 個交易日" if lag is not None else "")
+            f_txt = (f"第一次 ≥{th:g} 分在 {_md(f['date'])}（{when}，收 {f['close']:,.0f}，"
+                     f"比大底收盤高 {(f['close'] / e['bottom_close'] - 1) * 100:.1f}%，之後最多再跌 {f['further_drop_pct']:.1f}%"
+                     + (f"，20 日 {f['fwd20_pct']:+.1f}%" if f.get("fwd20_pct") is not None else "")
+                     + (f"，60 日 {f['fwd60_pct']:+.1f}%" if f.get("fwd60_pct") is not None else "") + "）")
+        else:
+            f_txt = f"跌勢中從沒到 {th:g} 分"
+        p = e.get("price_minus25")
+        p_txt = (f"純價格 -25% 在 {_md(p['date'])}（之後再跌 {p['further_drop_pct']:.1f}%）" if p
+                 else "沒跌到 -25%")
+        best_txt = (f"大底前後 5 天（跌勢中）最高 {best['score']:g} 分（{_md(best['date'])}）" if best
+                    else "大底前後 5 天都沒跌到計分門檻")
+        lines.append(f"- {e['label']}：大底 {_md(e['bottom_date'])}（收盤距高點 {e['bottom_dd_pct']:+.1f}%）當天 "
+                     f"{e['score_on_bottom']:g} 分；{best_txt}；{f_txt}；{p_txt}。")
+    lines.append(f"- 大底前後 5 天內分數有到 {th:g} 分的：{near} / {len(done)} 次。")
+    return "\n".join(lines)
+
+
 def replay() -> None:
-    bt = _read_json(BACKTEST_DAILY_FILE, {})
+    bt: dict = {}
+    for f in sorted((BASE / "data_export").glob("bottom_backtest_daily*.json")):
+        for d, rec in _read_json(f, {}).items():
+            merge(bt, d, rec)
     live = _read_json(DAILY_FILE, {})
     for d, rec in live.items():          # 正式檔較新 → 合進來一起看本波
         merge(bt, d, rec)
     policy = load_policy()
     th = policy.get("entry_threshold", 4)
+    gate = policy.get("active_when_drawdown_pct", -10)
     tw = fetch_yf("^TWII", date(2023, 9, 1), datetime.now(TW_TZ).date())
+    # 120 日高點要連續的日資料；yfinance 抓不到就停，別拿有缺口的官方收盤算錯高點還覆蓋掉摘要
+    if len(tw) < 500 or min(tw) > "2024-01-15":
+        print(f"❌ ^TWII 日資料不足（{len(tw)} 筆，最早 {min(tw) if tw else '無'}），回測中止、不覆蓋摘要")
+        return
     closes = sorted(tw.items())
     for d, rec in bt.items():            # 官方收盤優先
         if rec.get("taiex"):
@@ -686,10 +852,13 @@ def replay() -> None:
                          "score_on_bottom": scores[bd]["score"],
                          "lit_on_bottom": [i["name"] for i in scores[bd]["indicators"]
                                            if i["core"] and i["lit"] in ("yes", "partial")]})
-        mx_d = max(days, key=lambda d: scores[d]["score"])
-        info.update({"max_score": scores[mx_d]["score"], "max_score_date": mx_d})
+        # 只有「跌勢中」（距高點跌超過 gate）的日子才算數，跟正式計分卡同一個前提
+        act = [d for d in days if (tw[d] / peak_of[d] - 1) * 100 <= gate]
+        info["active_days"] = len(act)
+        mx_d = max(act, key=lambda d: scores[d]["score"]) if act else None   # 只算跌勢中的日子
+        info.update({"max_score": scores[mx_d]["score"] if mx_d else None, "max_score_date": mx_d})
         for lv in (2, th):
-            hit = next((d for d in days if scores[d]["score"] >= lv), None)
+            hit = next((d for d in act if scores[d]["score"] >= lv), None)
             key = f"first_{lv:g}"
             if not hit:
                 info[key] = None
@@ -711,15 +880,20 @@ def replay() -> None:
                 info[f"price_minus{lv}"] = None
         # 假警報：分數 >= 門檻之後 20 天內又跌超過 5%
         fa = []
-        for d in days:
+        for d in act:
             if scores[d]["score"] >= th:
                 nxt = [c for x, c in closes if d < x][:20]
                 if nxt and min(nxt) / tw[d] - 1 <= -0.05:
                     fa.append(d)
         info["false_alarm_days"] = fa
-        info["days_at_or_above_threshold"] = sum(1 for d in days if scores[d]["score"] >= th)
+        info["days_at_or_above_threshold"] = sum(1 for d in act if scores[d]["score"] >= th)
+        # 每天分數（跌勢中的日子），給儀表板畫走勢
+        info["daily"] = [{"date": d, "close": round(tw[d], 2), "dd": round((tw[d] / peak_of[d] - 1) * 100, 2),
+                          "score": scores[d]["score"], "active": d in act} for d in days]
         out["events"].append(info)
-        print(json.dumps(info, ensure_ascii=False))
+        print(json.dumps({k: v for k, v in info.items() if k != "daily"}, ensure_ascii=False))
+    out["conclusion"] = _conclusion(out["events"], th)
+    print("\n" + out["conclusion"])
     _write_json(BACKTEST_SUMMARY_FILE, out)
     csv_path = BASE / "data_export" / "bottom_backtest_daily_scores.csv"
     with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
@@ -756,8 +930,13 @@ def main() -> None:
     maybe_push(card, prev, policy, send=not (dry or quiet))
     if not dry:
         _write_json(DAILY_FILE, daily)
-        _write_json(CARD_FILE, card)
-        print(f"✅ 已寫入 {DAILY_FILE.name}、{CARD_FILE.name}")
+        # 只有時間戳不同就不重寫：避免雲端每跑一次都 commit（會增加跟其他排程搶 push 的機會）
+        strip = lambda c: {k: v for k, v in (c or {}).items() if k != "generated_at"}  # noqa: E731
+        if strip(card) != strip(prev):
+            _write_json(CARD_FILE, card)
+            print(f"✅ 已寫入 {DAILY_FILE.name}、{CARD_FILE.name}")
+        else:
+            print(f"ℹ️ 計分卡內容沒變，{CARD_FILE.name} 不重寫")
 
 
 if __name__ == "__main__":

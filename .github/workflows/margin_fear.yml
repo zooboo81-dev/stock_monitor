@@ -67,6 +67,6 @@ jobs:
             echo "無變動"
           else
             git commit -m "chore: update margin & fear gauge"
-            git pull --rebase
+            git pull --rebase --autostash
             git push
           fi
