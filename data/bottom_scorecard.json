@@ -1,6 +1,6 @@
 {
  "as_of": "2026-11-20",
- "generated_at": "2026-11-20T15:14:21+08:00",
+ "generated_at": "2026-11-20T15:16:05+08:00",
  "score": 2.0,
  "max": 8,
  "available": 8,
@@ -227,5 +227,5 @@
   "deployed_twd": 840000.0,
   "deploy_idx": 2
  },
- "push_level": 0
+ "push_level": 2
 }
