@@ -266,6 +266,14 @@ def main():
             msg += "\n\n" + _fear
     except Exception:
         pass
+    # 🎯 抄底計分卡（bottom_scorecard 前一晚寫入）
+    try:
+        import bottom_scorecard
+        _bs = bottom_scorecard.summary_line()
+        if _bs:
+            msg += "\n" + _bs
+    except Exception:
+        pass
 
     # 📔 Trade Journal 待回顧提醒
     try:

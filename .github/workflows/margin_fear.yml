@@ -12,6 +12,8 @@ on:
     branches: [main]
     paths:
       - margin_fear_gauge.py
+      - bottom_scorecard.py
+      - data/bottom_policy.json
       - .github/workflows/margin_fear.yml
 
 concurrency:
@@ -46,11 +48,21 @@ jobs:
           PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
         run: python margin_fear_gauge.py
 
+      # 11/20：抄底計分卡（8 項見底條件）。要用到當晚的融資維持率，所以接在融資之後跑；
+      # 失敗不擋融資狀態的 commit
+      - name: Run bottom scorecard
+        continue-on-error: true
+        env:
+          PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+          PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
+        run: python bottom_scorecard.py
+
       - name: Commit state
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add data/margin_fear_history.json data/margin_fear_state.json data/notifications.jsonl
+          git add data/bottom_daily.json data/bottom_scorecard.json || true
           if git diff --staged --quiet; then
             echo "無變動"
           else

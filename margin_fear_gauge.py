@@ -126,6 +126,7 @@ def fetch_margin_day(sess, d: str) -> dict | None:
         return None
     closes: dict[str, float] = {}
     taiex = taiex_pct = None
+    breadth = parse_breadth(p)   # 11/20：跌停／漲停家數（同一個回應，不多打證交所）
     for t in p.get("tables", []):
         f = t.get("fields") or []
         rows = t.get("data") or []
@@ -171,7 +172,28 @@ def fetch_margin_day(sess, d: str) -> dict | None:
         "margin_yi": round(amt_k / 1e5, 2),                       # 億元
         "margin_chg_yi": round((amt_k - (amt_prev_k or amt_k)) / 1e5, 2),
         "coverage_pct": round(coverage, 2),
+        **breadth,
     }
+
+
+def parse_breadth(mi_index: dict) -> dict:
+    """證交所 MI_INDEX 的「漲跌證券數合計」表 → 上市『股票』漲停／跌停家數（不含 ETF、權證）"""
+    import re
+    out: dict = {}
+    for t in mi_index.get("tables", []):
+        f = t.get("fields") or []
+        if "類型" not in f or "股票" not in f:
+            continue
+        si = f.index("股票")
+        for r in t.get("data") or []:
+            m = re.match(r"\s*([\d,]+)\s*\((\d+)\)", str(r[si]))
+            if not m:
+                continue
+            if str(r[0]).startswith("上漲"):
+                out["up_count"], out["limit_up"] = int(m.group(1).replace(",", "")), int(m.group(2))
+            elif str(r[0]).startswith("下跌"):
+                out["down_count"], out["limit_down"] = int(m.group(1).replace(",", "")), int(m.group(2))
+    return out
 
 
 def fetch_tw_vix(sess, months: list[str]) -> dict[str, float]:

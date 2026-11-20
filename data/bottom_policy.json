@@ -1,0 +1,55 @@
+{
+  "_comment": "抄底雷達（見底計分卡）規則（可用記事本編輯）。8 個核心指標：完全符合 1 分、初步符合 0.5 分、沒有 0 分。來源：2026-11-20 台股抄底指標資料包＋自家官方資料自動計算。",
+
+  "entry_threshold": 4,
+  "_entry_note": "資料包規則：累計 >= 4 分才放大部位，之前只用小部位、照跌幅分批。",
+  "tranche_drawdowns_pct": [25, 30, 35],
+  "_tranche_note": "資料包的小部位分批價位（自高點起算）。另外會一起顯示 bear_trigger_policy.json 的彈藥階梯。",
+
+  "push_levels": [2, 4, 6],
+  "push_reset_below": 1.5,
+  "_push_note": "分數往上跨過 2／4／6 分各推一次（同一波不重複推）；分數掉回 1.5 以下才重新計算。",
+
+  "rules": {
+    "margin_maintenance_ratio": {
+      "yes_below": 140, "partial_below": 150, "lookback_days": 3,
+      "_note": "自家算法（上市、證交所官方資料）。同算法歷史大底：2020/3 135.8%、2022/10 139.1%、2024/8/5 148.2%、2025/4/9 130.3%。新聞常見的 156% 是另一種口徑，不能混用。"
+    },
+    "forced_selling": {
+      "capitulation_day_pct": -2.5, "exhaust_ratio": 0.5, "window_days": 10,
+      "_note": "追繳／斷頭戶數沒有官方即時資料，改用『融資餘額單日減幅』當替代：出現 -2.5% 以上的斷頭日、最大斷頭日已過、之後連 2 日減幅都不到最大日的一半 = 出清完成。"
+    },
+    "foreign_futures_net_short": {
+      "yes_cover": 20000, "partial_cover": 10000, "min_short": 30000, "window_days": 60,
+      "_note": "外資台指期（大台）淨未平倉，自近 60 日最大淨空單回補的口數。"
+    },
+    "retail_mtx_long_short": {
+      "yes_at_or_below": 0, "partial_at_or_below": 5,
+      "_note": "小台散戶多空比 = −三大法人小台淨未平倉 ÷ 小台全市場未平倉（反向指標）。"
+    },
+    "pc_oi_ratio": {
+      "yes_at_or_above": 80, "washout_at_or_below": 60, "partial_rebound_pts": 15, "window_days": 20,
+      "_note": "選擇權 P/C 未平倉比：先被殺到低檔（<=60%）、再回到 80% 以上 = 賣權賣方回來築支撐。"
+    },
+    "twd": {
+      "yes_up_days": 3, "partial_up_days": 2,
+      "_note": "新台幣連續升值（美元兌台幣連續下跌）的天數。"
+    },
+    "limit_down_count": {
+      "panic_min": 100, "yes_at_or_below": 9, "partial_ratio": 0.3, "window_days": 10,
+      "_note": "上市股票跌停家數（不含 ETF、權證）。近 10 日出現 >=100 家的恐慌日後，降到個位數 = 完全符合。"
+    },
+    "foreign_spot_net": {
+      "yes_buy_days": 2, "partial_shrink_ratio": 0.5, "heavy_sell_yi": 150, "window_days": 10,
+      "_note": "外資及陸資（不含自營商）上市現貨買賣超（億元）。"
+    },
+    "tw_vix": {
+      "spike_at_or_above": 40, "yes_down_days": 2, "window_days": 10,
+      "_note": "參考、不計分：衝上 40 以上後連 2 天收低。"
+    },
+    "us_vix": {
+      "spike_at_or_above": 30, "yes_down_days": 2, "window_days": 10,
+      "_note": "參考、不計分：本波是台股局部崩跌，美股 VIX 未必同步。"
+    }
+  }
+}

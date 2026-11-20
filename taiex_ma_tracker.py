@@ -64,12 +64,20 @@ def _wan(twd: float) -> str:
 
 def _fear_line() -> str:
     """最新一筆融資維持率＋恐慌指數（margin_fear_gauge 每晚寫入，這裡只讀檔）"""
+    lines = []
     try:
         import margin_fear_gauge
-        line = margin_fear_gauge.summary_line()
-        return f"\n\n{line}" if line else ""
+        lines.append(margin_fear_gauge.summary_line())
     except Exception:
-        return ""
+        pass
+    try:
+        # 11/20：抄底計分卡（8 項見底條件，bottom_scorecard 每晚寫入）— 價格梯觸發時一起看
+        import bottom_scorecard
+        lines.append(bottom_scorecard.summary_line())
+    except Exception:
+        pass
+    lines = [x for x in lines if x]
+    return ("\n\n" + "\n".join(lines)) if lines else ""
 
 
 def _deepest_level_idx(dist_peak: float, levels: list[dict]) -> int:
