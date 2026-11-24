@@ -1,0 +1,7 @@
+# 國泰美股對帳單同步：整個資料夾不上 GitHub（設定檔含 Gmail／PDF 密碼，PDF 與清單含個資）
+# 只保留程式碼本身方便備份
+*
+!.gitignore
+!*.py
+!*.bat
+!requirements.txt

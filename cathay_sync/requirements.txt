@@ -1,0 +1,2 @@
+# 國泰美股對帳單同步需要的套件（用 py -3 -m pip install -r requirements.txt 安裝）
+PyMuPDF>=1.24

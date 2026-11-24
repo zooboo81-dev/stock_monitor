@@ -91,6 +91,7 @@ class Job:
     alert_title: str = ""            # 失敗推播的標題（空白＝「⚠️ 台股排程失敗：{label}」）
     alert_body: str = ""             # 失敗推播的開頭說明（空白＝「這台電腦跑「…」失敗」）
     alert_silent: bool = False       # 失敗／恢復推播不響（只進通知列表）
+    selftest: bool = True            # False＝排程試跑（job_selftest）不跑這項（要連信箱、吃個資檔的工作）
 
 
 _INTRADAY_FILES = ["data/intraday_state.json", "data/trailing_state.json"]
@@ -139,6 +140,16 @@ DEFAULT_JOBS = [
         timeout=2400, alert_after=2, alert_silent=True,
         alert_title="🧪 台股排程試跑：有工作到時候會失敗",
         alert_body="還沒真的出事——是排程時間之前先在沙盒試跑抓到的。把這則訊息給 Claude 看就能修。"),
+    # 國泰美股（複委託）對帳單：Gmail → PDF → 入帳 CSV＋核對（cathay_sync\，資料都不進版控，所以 commit 清單是空的）。
+    # 時間照實際寄達時間排（2026-11 量 65 封）：買賣報告書成交隔天 13:04～18:06 寄到（中位 13:31、九成 15:04 前），
+    # 月對帳單每月 5～10 號、整天都可能寄。週末也跑（週五成交的報告書週六寄）。
+    # 不進排程試跑：它要連信箱、讀上鎖的 PDF，而且 cathay_sync 整個資料夾不複製進沙盒。
+    Job("cathay_us", "國泰美股對帳單同步", [["cathay_sync/sync_cathay.py"]], [],
+        "chore: cathay us statement", times=["14:20", "18:30", "22:50"], catchup_min=180,
+        trading_day_only=False, alert_after=2, selftest=False,
+        alert_title="⚠️ 國泰美股對帳單同步失敗",
+        alert_body="國泰美股對帳單這次沒同步成功（信箱連不上、PDF 打不開，或核對沒過）。"
+                   "戰情室先顯示上次的資料。把這則訊息給 Claude 看就能查。"),
 ]
 
 
