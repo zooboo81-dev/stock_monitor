@@ -1,20 +1,26 @@
 name: Margin & Fear Gauge
 
 on:
-  schedule:
-    # 證交所融資資料約 21:30 後公布
-    # 台灣 22:20 = UTC 14:20；23:30 = UTC 15:30 補跑（已處理過的日期會自動跳過）
-    - cron: '20 14 * * 1-5'
-    - cron: '30 15 * * 1-5'
-  workflow_dispatch:  # 允許手動觸發測試
-  push:
-    # 程式或排程本身有改 → 推上來就跑一次驗證（已處理過的日期會自動跳過，不會重複推播）
-    branches: [main]
-    paths:
-      - margin_fear_gauge.py
-      - bottom_scorecard.py
-      - data/bottom_policy.json
-      - .github/workflows/margin_fear.yml
+  # 2026-11-24：定時觸發關掉了，改由家裡電腦的「本機準時跑」（local_runner.py）準時執行。
+  # 原因：GitHub 的定時器實測晚 7～12 小時才跑（盤中警示一天只跑 2 次、都在收盤後）。
+  # 這裡只留手動：GitHub 網頁 Actions → 選這個工作 → Run workflow（家裡電腦壞掉時的備援）。
+  # 要恢復雲端定時：把下面「原設定」每行開頭的「# 」拿掉，並把 data/local_schedule.json 對應項目關掉（不要兩邊同時跑）。
+  # ---- 原設定 ----
+  # schedule:
+  #   # 證交所融資資料約 21:30 後公布
+  #   # 台灣 22:20 = UTC 14:20；23:30 = UTC 15:30 補跑（已處理過的日期會自動跳過）
+  #   - cron: '20 14 * * 1-5'
+  #   - cron: '30 15 * * 1-5'
+  # push:
+  #   # 程式或排程本身有改 → 推上來就跑一次驗證（已處理過的日期會自動跳過，不會重複推播）
+  #   branches: [main]
+  #   paths:
+  #     - margin_fear_gauge.py
+  #     - bottom_scorecard.py
+  #     - data/bottom_policy.json
+  #     - .github/workflows/margin_fear.yml
+  # ----------------
+  workflow_dispatch:
 
 concurrency:
   group: margin-fear

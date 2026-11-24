@@ -1,0 +1,20 @@
+{
+  "_說明": [
+    "台股「本機準時跑」的時刻表。這台電腦每 5 分鐘看一次，到時間的就跑，跑完自動推上 GitHub。",
+    "不想要某一項：把它的 enabled 改成 false，存檔就好（5 分鐘內生效，不用重開任何東西）。",
+    "想改時間：改 times（24 小時制 時:分）。盤中警示改 every_min（每幾分鐘）和 window（起、訖）。",
+    "看現況：在 stock_monitor 資料夾按兩下「看排程狀態.bat」。"
+  ],
+  "jobs": {
+    "intraday":         {"名稱": "盤中警示：大盤急跌、跌破均線、持股跌破停損（同一件事一天只推一次）", "enabled": true, "every_min": 5, "window": ["09:00", "13:35"]},
+    "intraday_close":   {"名稱": "收盤後補檢查一次", "enabled": true, "times": ["14:30"]},
+    "morning_briefing": {"名稱": "晨間摘要", "enabled": true, "times": ["08:50"]},
+    "expiration_check": {"名稱": "持股到期檢查（T+10）", "enabled": true, "times": ["09:00"]},
+    "taiex_ma":         {"名稱": "大盤均線＋空頭加碼判斷", "enabled": true, "times": ["14:10", "15:10"]},
+    "watchlist":        {"名稱": "觀察名單", "enabled": true, "times": ["14:40"]},
+    "recs":             {"名稱": "推薦快照", "enabled": true, "times": ["17:30"]},
+    "margin_fear":      {"名稱": "融資維持率＋恐慌指數＋抄底計分卡（16:40 先更新下午公布的，21:35 起等融資）", "enabled": true, "times": ["16:40", "21:35", "22:05", "22:35", "23:30"]},
+    "margin_fear_am":   {"名稱": "融資／計分卡早上補跑（前一晚證交所晚公布時用）", "enabled": true, "times": ["07:30"]},
+    "allocation":       {"名稱": "月度配置檢查（每月 1 號）", "enabled": true, "times": ["08:50"]}
+  }
+}

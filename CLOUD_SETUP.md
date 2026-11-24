@@ -1,5 +1,12 @@
 # ☁️ 雲端部署指南（GitHub Actions + Streamlit Cloud）
 
+> **2026-11-24 改制：這些排程改由家裡電腦準時跑，不再靠 GitHub 的定時器。**
+> 原因：GitHub 的定時器實測晚 7～12 小時才跑（盤中警示一天只跑 2 次、都在收盤後；晨間摘要 9/11 之後雲端每天失敗）。
+> 現在：Windows 排程「\理財\台股準時跑」每 5 分鐘叫一次 `local_runner.py tick`，照 `data/local_schedule.json` 的時刻表跑，
+> 跑完自動 commit＋push。雲端這幾個工作只留手動 Run workflow 當備援（每月 15 號的 Walk-Forward 仍在雲端定時跑）。
+> 看現況：按兩下 `看排程狀態.bat`｜重建排程：按兩下 `安裝本機準時跑排程.bat`｜關掉某一項：改 `data/local_schedule.json` 的 enabled。
+> 下面的表格是「原本的雲端時間」，留著當紀錄。
+
 ## 📅 排程時間對照（UTC ↔ 台灣）
 
 | 工作 | 台灣時間 | UTC cron | 週幾 |

@@ -192,11 +192,12 @@ def main():
     html = generate_html(today, regime, macro, night, triggered, near_stop, safe_locked, events)
     OUTPUT_HTML.write_text(html, encoding="utf-8")
 
-    # 自動開啟
-    try:
-        os.startfile(str(OUTPUT_HTML))
-    except Exception:
-        pass
+    # 自動開啟（本機準時跑 local_runner 在背景執行時不開：電腦前沒人，瀏覽器分頁只會越積越多）
+    if not os.environ.get("STOCK_RUNNER"):
+        try:
+            os.startfile(str(OUTPUT_HTML))
+        except Exception:
+            pass
 
     # 讀台指期最新訊號
     txf = read_latest_txf_verdict()

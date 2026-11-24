@@ -96,3 +96,11 @@ tssco_sync/*
 !tssco_sync/*.bat
 !tssco_sync/create_task.ps1
 !tssco_sync/requirements.txt
+
+# 本機準時跑（local_runner.py）的執行狀態與紀錄：只跟這台電腦有關，不上 GitHub
+data/local_runner_state.json
+data/local_runner.log
+data/local_runner.lock
+data/twse_holidays.json
+# Claude 預覽設定（本機用）
+.claude/

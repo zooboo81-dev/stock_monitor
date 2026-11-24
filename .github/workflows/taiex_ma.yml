@@ -1,10 +1,16 @@
 name: TAIEX MA Tracker
 
 on:
-  schedule:
-    # 台灣 14:00 = UTC 06:00（週一至五）
-    - cron: '0 6 * * 1-5'
-  workflow_dispatch:  # 允許手動觸發測試
+  # 2026-11-24：定時觸發關掉了，改由家裡電腦的「本機準時跑」（local_runner.py）準時執行。
+  # 原因：GitHub 的定時器實測晚 7～12 小時才跑（盤中警示一天只跑 2 次、都在收盤後）。
+  # 這裡只留手動：GitHub 網頁 Actions → 選這個工作 → Run workflow（家裡電腦壞掉時的備援）。
+  # 要恢復雲端定時：把下面「原設定」每行開頭的「# 」拿掉，並把 data/local_schedule.json 對應項目關掉（不要兩邊同時跑）。
+  # ---- 原設定 ----
+  # schedule:
+  #   # 台灣 14:00 = UTC 06:00（週一至五）
+  #   - cron: '0 6 * * 1-5'
+  # ----------------
+  workflow_dispatch:
 
 jobs:
   run:
