@@ -156,6 +156,9 @@ def main():
         if not q:
             continue
         px = q["price"]
+        # 定存區預留列（0 股、成本 0）不算損益：以前這裡拿 0 當除數，整支晨報當掉（雲端 9/11 之後每天失敗的原因）
+        if cost <= 0:
+            continue
         pnl_pct = (px - cost) / cost * 100
         if not sl_str or sl_str == "nan" or sl_str == "":
             continue

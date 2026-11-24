@@ -225,7 +225,7 @@ def render(st, ma_state: dict | None, live: dict | None, has_txf: bool = True) -
         f"padding:2px 10px;font-size:15px;font-weight:800'>🎯 {score:g} / {mx}</span>"
         f"<span style='font-size:12px;color:{chip_c};font-weight:700'>{_e(card.get('verdict'))}</span></div>"
         f"<div style='display:flex;align-items:center;gap:8px'>{_spark(card.get('score_history', []), mx, th)}"
-        f"<span style='font-size:10.5px;color:#888'>指標資料 {_md(card.get('as_of'))}<br>每晚 22:20 後更新</span></div>"
+        f"<span style='font-size:10.5px;color:#888'>指標資料 {_md(card.get('as_of'))}<br>16:40 先更新、21:35 起補融資</span></div>"
         f"</div>"
         # 跌幅階梯
         f"<div style='margin-top:8px'>{ladder_html}</div>"
