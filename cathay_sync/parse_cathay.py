@@ -210,14 +210,33 @@ def check_tx(r):
     expect = -(r["amount"] + r["fee"] + r["tax"]) if kind == "買進" else r["amount"] - r["fee"] - r["tax"]
     if abs(expect - r["net"]) > CENT:
         errs.append(f"金額±費用 {expect} ≠ 應收付 {r['net']}")
-    if r["fx"] > 0:
-        if abs(r["net"] * r["fx"] - r["net2"]) > TWD_TOL:
-            errs.append(f"美元×匯率 {r['net'] * r['fx']:.0f} ≠ 台幣 {r['net2']}")
-    elif r["net2"] != 0:
+    if r["fx"] <= 0 and r["net2"] != 0:
         errs.append("沒有匯率卻有台幣金額")
     if r["shares"] <= 0:
         errs.append(f"股數不是正數：{r['shares']}")
-    return errs
+    return errs       # 台幣金額另外用 check_twd 整批驗（見下）
+
+
+def check_twd(rows):
+    """台幣金額驗算，回傳問題清單。
+    通常每筆＝美元應收付×匯率（四捨五入到元）。但同一天、同一個匯率有好幾筆時，銀行是整批換匯一次扣款；
+    券商為了讓各筆加起來等於實際扣款，會把 1～幾元的尾差調在其中一筆（2026-11-23 實例：三筆同匯率，其中一筆少 1 元）。
+    所以：單筆差 1 元內 → 過；超過 → 同一批的合計要對得上（差 1 元內），而且單筆的差不能超過「筆數×0.5＋1」元。"""
+    out, groups = [], defaultdict(list)
+    for r in rows:
+        if r["fx"] > 0:
+            groups[(r["date"], r["ccy2"], r["fx"])].append(r)
+    for (day, _ccy, fx), rs in groups.items():
+        gaps = [r["net"] * fx - r["net2"] for r in rs]
+        worst = max(abs(g) for g in gaps)
+        if worst <= TWD_TOL:
+            continue
+        if len(rs) > 1 and abs(sum(gaps)) <= TWD_TOL and worst <= Decimal("0.5") * len(rs) + TWD_TOL:
+            continue  # 尾差調在其中一筆，整批合計對得上
+        bad = max(rs, key=lambda r: abs(r["net"] * fx - r["net2"]))
+        out.append(f"{day} {bad['code']} {bad.get('kind', '')}：美元×匯率 {bad['net'] * fx:.0f} ≠ 台幣 {bad['net2']:.0f}"
+                   + (f"（同匯率那一批 {len(rs)} 筆合計差 {sum(gaps):+.0f} 元）" if len(rs) > 1 else ""))
+    return out
 
 
 # ───────────────────────── 整份文件 ─────────────────────────
@@ -249,11 +268,11 @@ def parse_daily(path, password):
                     if not (i + 2 < len(lines) and near(ln, lines[i + 1], 9) and near(ln, lines[i + 2], 16)):
                         raise RowError("這筆不是完整的三行")
                     row = daily_row(ln, lines[i + 1], lines[i + 2])
+                    i += 2            # 三行都是這一筆的（驗算沒過也一樣），後兩行不要再被當成「沒讀到的列」
                     errs = check_tx(row)
                     if errs:
                         raise RowError("；".join(errs))
                     res["rows"].append(row)
-                    i += 2
                 except RowError as e:
                     res["problems"].append(f"第 {pno} 頁序號 {t[0]} 讀不懂：{e}")
             elif mode == "tx" and is_data_font(ln):
@@ -263,6 +282,7 @@ def parse_daily(path, password):
         res["problems"].append("找不到這份報告書的日期")
     for r in res["rows"]:
         r["date"] = res["date"]
+    res["problems"] += check_twd(res["rows"])
     by_ccy = defaultdict(lambda: ZERO)
     for r in res["rows"]:
         by_ccy[r["ccy"]] += r["net"]
@@ -301,11 +321,11 @@ def parse_monthly(path, password):
                     if not (i + 2 < len(lines) and near(ln, lines[i + 1], 9) and near(ln, lines[i + 2], 16)):
                         raise RowError("這筆不是完整的三行")
                     row = monthly_row(ln, lines[i + 1], lines[i + 2])
+                    i += 2            # 三行都是這一筆的（驗算沒過也一樣）
                     errs = check_tx(row)
                     if errs:
                         raise RowError("；".join(errs))
                     res["tx"].append(row)
-                    i += 2
                 except RowError as e:
                     res["problems"].append(f"第 {pno} 頁 {t[0]} {t[1] if len(t) > 1 else ''} 讀不懂：{e}")
             elif (mode == "hold" and len(t) >= 6 and RE_CCY.match(t[0]) and RE_NUM.match(t[1])
@@ -322,6 +342,7 @@ def parse_monthly(path, password):
             i += 1
     if not res["as_of"] or not res["start"]:
         res["problems"].append("找不到這份對帳單的期間")
+    res["problems"] += check_twd(res["tx"])
     for h in res["holdings"]:  # 券商自己的數字也驗一下，確認欄位沒讀歪
         if abs(h["shares"] * h["close"] - h["value_usd"]) > max(CENT, h["shares"] * Decimal("0.00006")):
             res["problems"].append(f"庫存 {h['code']}：股數×收盤價 ≠ 參考市值")
