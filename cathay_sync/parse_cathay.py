@@ -30,7 +30,7 @@ import sys
 from bisect import bisect_right
 from collections import Counter, defaultdict, namedtuple
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from pathlib import Path
 
 import sync_cathay as sc
@@ -217,15 +217,36 @@ def check_tx(r):
     return errs       # 台幣金額另外用 check_twd 整批驗（見下）
 
 
+def twd_range(r):
+    """除息的台幣可能落在哪裡：毛額、稅、費用各自換成台幣再相減，每一項可能進位、也可能捨去 → (最小, 最大)"""
+    def up(x):
+        return x.to_integral_value(rounding=ROUND_CEILING)
+
+    def down(x):
+        return x.to_integral_value(rounding=ROUND_FLOOR)
+
+    g, t, f = (x * r["fx"] for x in (r["amount"], r["tax"], r["fee"]))
+    return down(g) - up(t) - up(f), up(g) - down(t) - down(f)
+
+
 def check_twd(rows):
     """台幣金額驗算，回傳問題清單。
-    通常每筆＝美元應收付×匯率（四捨五入到元）。但同一天、同一個匯率有好幾筆時，銀行是整批換匯一次扣款；
+    買賣：通常每筆＝美元應收付×匯率（四捨五入到元）。但同一天、同一個匯率有好幾筆時，銀行是整批換匯一次扣款；
     券商為了讓各筆加起來等於實際扣款，會把 1～幾元的尾差調在其中一筆（2026-11-23 實例：三筆同匯率，其中一筆少 1 元）。
-    所以：單筆差 1 元內 → 過；超過 → 同一批的合計要對得上（差 1 元內），而且單筆的差不能超過「筆數×0.5＋1」元。"""
+    所以：單筆差 1 元內 → 過；超過 → 同一批的合計要對得上（差 1 元內），而且單筆的差不能超過「筆數×0.5＋1」元。
+    除息：不走整批換匯，是毛額、稅各自換成台幣再相減（實測有幾筆跟「淨額×匯率」差 0.5～0.9 元，各項進位或捨去
+    看不出固定規則）→ 單筆差 1 元內，或落在 twd_range（各項各自進位／捨去）的範圍內，都算對。"""
     out, groups = [], defaultdict(list)
     for r in rows:
-        if r["fx"] > 0:
-            groups[(r["date"], r["ccy2"], r["fx"])].append(r)
+        if r["fx"] <= 0:
+            continue
+        if r.get("kind") == "除息":
+            lo, hi = twd_range(r)
+            if not (abs(r["net"] * r["fx"] - r["net2"]) <= TWD_TOL or lo <= r["net2"] <= hi):
+                out.append(f"{r['date']} {r['code']} 除息：台幣 {r['net2']:.0f}，淨額×匯率 {r['net'] * r['fx']:.2f}，"
+                           f"也不在毛額、稅各自換匯的範圍 {lo:.0f}～{hi:.0f} 內")
+            continue
+        groups[(r["date"], r["ccy2"], r["fx"])].append(r)
     for (day, _ccy, fx), rs in groups.items():
         gaps = [r["net"] * fx - r["net2"] for r in rs]
         worst = max(abs(g) for g in gaps)
