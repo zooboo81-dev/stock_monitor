@@ -43,6 +43,10 @@ def send_push(title: str, body: str, priority: int = 0,
     priority: -2/-1/0/1/2
     若 priority=2，會自動加 retry=60、expiry=1800（30 分內每分鐘響一次）
     """
+    # 試跑（job_selftest.py）只印出來、不真的推到手機
+    if os.environ.get("STOCK_DRY_RUN"):
+        print(f"[試跑・不推到手機] {title}")
+        return True
     cfg = _load_config()
     if not cfg or not cfg.get("enabled"):
         return False

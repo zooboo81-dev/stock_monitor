@@ -56,6 +56,13 @@ STATE_FILE.parent.mkdir(exist_ok=True)
 
 def compute_trail_stop(entry: float, peak: float) -> tuple[float, str]:
     """回傳 (trail_stop_price, tier_label)"""
+    # 成本 0／空白（定存區預留列、資料打錯）算不出漲幅 → 當作未啟動，不要除以 0 害呼叫的程式整支當掉
+    try:
+        entry, peak = float(entry), float(peak)
+    except (TypeError, ValueError):
+        return (0.0, "未啟動")
+    if not (entry > 0 and peak > 0):      # NaN 比大小一律是 False，也會擋下來
+        return (0.0, "未啟動")
     gain_pct = (peak - entry) / entry * 100
     if gain_pct < 10:
         return (0.0, "未啟動")
@@ -67,8 +74,14 @@ def compute_trail_stop(entry: float, peak: float) -> tuple[float, str]:
 
 
 def effective_stop(fixed_stop: float, trail_stop: float) -> float:
-    """生效停損 = 兩者取高"""
-    return max(fixed_stop, trail_stop)
+    """生效停損 = 兩者取高（空白／NaN 當 0；以前 max(NaN, trail) 會回 NaN，停損空白的股票移動停利就失效）"""
+    def _f(x) -> float:
+        try:
+            x = float(x)
+        except (TypeError, ValueError):
+            return 0.0
+        return x if x > 0 else 0.0
+    return max(_f(fixed_stop), _f(trail_stop))
 
 
 # ---------- 狀態管理 ----------
@@ -128,7 +141,9 @@ def update_peaks(init_mode: bool = False) -> list[dict]:
     """更新 peak 並回傳每檔狀態"""
     if not PORTFOLIO_FILE.exists():
         return []
-    df = pd.read_csv(PORTFOLIO_FILE, dtype={"code": str})
+    # 只拿真的有持股的列（定存區預留列成本 0，以前在這裡除以 0 當掉）
+    from holdings import load_positions
+    df = load_positions(PORTFOLIO_FILE)
     state = load_state()
     today = date.today().isoformat()
     quotes = fetch_prices(df["code"].tolist())
@@ -136,8 +151,8 @@ def update_peaks(init_mode: bool = False) -> list[dict]:
     rows = []
     for _, r in df.iterrows():
         code = r["code"]
-        entry = float(r["cost"])
-        fixed_stop = float(r["stop_loss"]) if pd.notna(r.get("stop_loss")) else 0.0
+        entry = r["cost_n"]
+        fixed_stop = r["stop_n"]
         q = quotes.get(code, {})
         current = q.get("price", entry)
         today_high = q.get("today_high", current)

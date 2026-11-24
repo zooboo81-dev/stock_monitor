@@ -102,5 +102,7 @@ data/local_runner_state.json
 data/local_runner.log
 data/local_runner.lock
 data/twse_holidays.json
+# 排程試跑（job_selftest.py）上次的結果：只跟這台電腦有關（沙盒本身在 data_export/_selftest，上面已整個忽略）
+data/selftest_last.json
 # Claude 預覽設定（本機用）
 .claude/

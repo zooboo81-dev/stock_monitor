@@ -75,12 +75,15 @@ def main():
 
     # 計算各層資產
     actual = {"swing": 0, "core": 0, "income": 0, "cash": cash}
+    from holdings import to_num     # 股數寫成 1000.0、空白、亂打都不會當掉（以前 int("1000.0") 會）
     for h in holdings:
-        shares = int(h.get("shares", 0) or 0)
+        shares = to_num(h.get("shares"))
         if shares <= 0:
             continue
-        code = h["code"]
-        price = fetch_price(code) or float(h.get("cost", 0) or 0)
+        code = (h.get("code") or "").strip()
+        if not code:
+            continue
+        price = fetch_price(code) or to_num(h.get("cost"))
         val = shares * price
         ht = (h.get("hold_type") or "swing").strip().lower()
         if ht not in actual:
@@ -110,8 +113,9 @@ def main():
 
     # 產月度摘要（每月都推）+ 若有 drift 大的加警告
     lines = [f"📊 資產配置月度檢查\n"]
+    progress = actual_total / target_total * 100 if target_total else 0
     lines.append(f"總資產進度：{actual_total:,.0f} / {target_total:,.0f} "
-                 f"（{actual_total/target_total*100:.1f}%）\n")
+                 f"（{progress:.1f}%）\n")
     over_threshold = [a for a in alerts if a["over_threshold"]]
 
     for a in alerts:

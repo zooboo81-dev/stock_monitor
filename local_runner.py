@@ -16,6 +16,13 @@
   python  local_runner.py run intraday --no-git   # 只跑、不碰 git
   python  local_runner.py sync              # 只跟 GitHub 同步
   python  local_runner.py status            # 每個工作上次什麼時候跑、成功沒、下次幾點
+  python  local_runner.py selftest          # 在沙盒把每個工作試跑一遍（不推到手機），事先抓會當掉的
+
+失敗與恢復（2026-11-24 起）：
+  工作失敗 → 推「⚠️ 台股排程失敗」；之後重跑成功 → 再推「✅ 已恢復」，你就知道不用處理了。
+  同一項一天最多推 3 次失敗（時好時壞也不會一直吵）。
+  每天 07:00、20:00 還會跑「排程試跑」（job_selftest.py）：程式、持股、設定有改過（或滿 7 天）就在沙盒
+  ＋怪資料把每一項跑一遍，到時候會當掉的先推「🧪」提醒；什麼都沒改的話幾秒就跳過。
 
 設定：data/local_schedule.json（記事本可改：每個工作的開關與時間）
 紀錄：data/local_runner.log；狀態：data/local_runner_state.json（都不上 GitHub）
@@ -81,6 +88,9 @@ class Job:
     max_attempts: int = 2            # 同一時刻最多試幾次
     expect: tuple | None = None      # (檔, 欄位, 最晚時刻)：過了這時刻欄位還不是今天 → 推播
     enabled: bool = True
+    alert_title: str = ""            # 失敗推播的標題（空白＝「⚠️ 台股排程失敗：{label}」）
+    alert_body: str = ""             # 失敗推播的開頭說明（空白＝「這台電腦跑「…」失敗」）
+    alert_silent: bool = False       # 失敗／恢復推播不響（只進通知列表）
 
 
 _INTRADAY_FILES = ["data/intraday_state.json", "data/trailing_state.json"]
@@ -121,6 +131,14 @@ DEFAULT_JOBS = [
     Job("allocation", "月度配置檢查（每月 1 號）", [["allocation_check.py"]], [],
         "chore: monthly allocation check", times=["08:50"], catchup_min=600,
         trading_day_only=False, month_day=1),
+    # 事先試跑（2026-11-24 起，起因：晨間摘要遇到成本 0 的預留列當掉）：程式、持股、設定改過（或滿 7 天）
+    # 就在沙盒＋怪資料把上面每一項跑一遍，「到時候會當掉」的先推播；什麼都沒改的話幾秒就跳過。
+    # 07:00 在早上的工作（07:30 融資補跑、08:50 晨間摘要、09:00 開盤）之前；20:00 給白天改過的程式。
+    Job("selftest", "排程試跑（事先抓會當掉的程式）", [["job_selftest.py", "--canary"]], [],
+        "chore: selftest", times=["07:00", "20:00"], catchup_min=30, trading_day_only=False,
+        timeout=2400, alert_after=2, alert_silent=True,
+        alert_title="🧪 台股排程試跑：有工作到時候會失敗",
+        alert_body="還沒真的出事——是排程時間之前先在沙盒試跑抓到的。把這則訊息給 Claude 看就能修。"),
 ]
 
 
@@ -299,18 +317,52 @@ def is_trading_day(d: date) -> bool:
 
 
 # ---------------------------------------------------------------- 推播
-def alert_once(st: dict, key: str, title: str, body: str) -> None:
-    """同一件事一天只推一次"""
-    today = date.today().isoformat()
-    if st["alerts"].get(key) == today:
-        return
-    st["alerts"][key] = today
+MAX_FAIL_ALERTS_PER_DAY = 3      # 同一項工作一天最多推幾次「失敗」
+
+
+def _send(title: str, body: str, silent: bool = False) -> None:
     log(f"📣 推播：{title}｜{body[:200]}")
     try:
         import telegram_notify
-        telegram_notify.send(title, body)
+        telegram_notify.send(title, body, silent=silent)
     except Exception as e:
         log(f"⚠️ 推播失敗：{e}")
+
+
+def alert_once(st: dict, key: str, title: str, body: str) -> bool:
+    """同一件事一天只推一次。回傳這次有沒有推"""
+    today = date.today().isoformat()
+    if st["alerts"].get(key) == today:
+        return False
+    st["alerts"][key] = today
+    _send(title, body)
+    return True
+
+
+def alert_job_failed(job: "Job", js: dict) -> None:
+    """工作失敗推播：一次出事推一則（隔天還沒好會再提醒）；修好推過「已恢復」後再壞才會再推；
+    一天最多 MAX_FAIL_ALERTS_PER_DAY 則，時好時壞也不會一直吵"""
+    today = date.today().isoformat()
+    if js.get("alerted") == today:
+        return
+    cnt = js.get("alert_count") if isinstance(js.get("alert_count"), dict) else {}
+    n = int(cnt.get(today, 0) or 0)
+    if n >= MAX_FAIL_ALERTS_PER_DAY:
+        return
+    title = job.alert_title or f"⚠️ 台股排程失敗：{job.label}"
+    intro = job.alert_body or f"這台電腦跑「{job.label}」失敗（連續 {js.get('fail_streak', 1)} 次）。"
+    _send(title, f"{intro}\n排程會自動再試；恢復正常時會再推「✅ 已恢復」。\n\n{js.get('last_error', '')[-500:]}",
+          silent=job.alert_silent)
+    js["alerted"] = today
+    js["alert_count"] = {today: n + 1}
+
+
+def alert_job_recovered(job: "Job", js: dict) -> None:
+    """之前推過「失敗」的工作重跑成功 → 補一則「已恢復」，才知道不用處理了"""
+    if not js.pop("alerted", None):
+        return
+    _send(f"✅ 台股排程恢復：{job.label}",
+          f"「{job.label}」{_now():%H:%M} 重跑成功，已恢復正常，不用處理。", silent=job.alert_silent)
 
 
 # ---------------------------------------------------------------- git
@@ -545,14 +597,14 @@ def run_job(job: Job, st: dict, slots: list | None = None, use_git: bool = True)
             js["last_commit"] = sha
         for s in slots or []:
             done[s] = "ok"
+        alert_job_recovered(job, js)
     else:
         js["fail_streak"] = js.get("fail_streak", 0) + 1
         for s in slots or []:
             n = done.get(s, 0)
             done[s] = (n if isinstance(n, int) else 0) + 1
         if js["fail_streak"] >= job.alert_after:
-            alert_once(st, f"fail:{job.key}", f"⚠️ 台股排程失敗：{job.label}",
-                       f"這台電腦跑「{job.label}」失敗（連續 {js['fail_streak']} 次）。\n\n{js['last_error'][-500:]}")
+            alert_job_failed(job, js)
     log(f"{'✅' if ok else '❌'} {job.label}（{dur:.0f} 秒）")
     return ok
 
@@ -678,6 +730,15 @@ def status() -> None:
               f"｜下次 {_next_due(j, now)}")
         if js.get("last_error"):
             print("    ↳ " + js["last_error"].splitlines()[0][:120])
+    t = _read_json(DATA / "selftest_last.json", {})
+    if isinstance(t, dict) and t.get("at"):
+        bad = [str(r.get("label", "")) for r in (t.get("results") or []) if r.get("status") == "fail"]
+        bad += [str(b) for b in (t.get("syntax_errors") or [])]
+        print("-" * 100)
+        print(f"排程試跑（沙盒＋怪資料）：{str(t['at'])[:16].replace('T', ' ')}｜"
+              + ("全部通過" if t.get("ok") else "有問題：" + "、".join(bad)[:150])
+              + ("（只試了部分項目）" if t.get("only") else "")
+              + "｜立刻再試：py -3 -X utf8 job_selftest.py")
 
 
 def main() -> None:
@@ -696,6 +757,9 @@ def main() -> None:
             ok = sync(st)
             save_state(st)
             print("同步完成" if ok else f"同步有狀況：{st['sync'].get('error')}")
+    elif cmd == "selftest":
+        import job_selftest
+        sys.exit(job_selftest.main(args[1:]))
     elif cmd == "run" and len(args) >= 2:
         jobs = {j.key: j for j in load_jobs()}
         if args[1] not in jobs:

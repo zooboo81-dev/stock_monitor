@@ -109,6 +109,10 @@ def _push_to_pushover(title: str, body: str, priority: int) -> bool:
 
 def send(title: str, body: str, silent: bool = False) -> bool:
     """寫入通知中心 + 推播到手機。silent=True 時強制降級為 low priority。"""
+    # 試跑（job_selftest.py，環境變數 STOCK_DRY_RUN=1）：只印出來，不寫通知中心、不推到手機
+    if os.environ.get("STOCK_DRY_RUN"):
+        print(f"[試跑・不推播] {title}｜{str(body)[:200]}")
+        return True
     # 1) 寫入通知檔（雲端 → notifications.jsonl；桌機 → notifications_local.jsonl）
     ok_jsonl = False
     try:

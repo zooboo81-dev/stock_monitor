@@ -179,7 +179,7 @@ def fetch_portfolio_prices(session: requests.Session) -> list[dict]:
         # 跳過 cost=0（避免 trailing_stop 除以零）
         try:
             entry = float(r["cost"])
-            if entry <= 0:
+            if not entry > 0:      # 成本 0 或空白（NaN）都跳過
                 continue
         except (ValueError, TypeError):
             continue
@@ -253,6 +253,9 @@ def check_conditions(
             f"Nasdaq 期貨 {nq['chg_pct']:+.2f}%（{nq['last']:,.0f}）— 美股弱勢"
         ))
     for s in stocks:
+        # 沒設停損（空白／0）而且移動停利還沒啟動 → 沒有停損可比，跳過（以前停損寫 0 會除以 0，整支當掉）
+        if not s["stop"] > 0:
+            continue
         dist_pct = (s["price"] - s["stop"]) / s["stop"] * 100
         tier = s.get("tier", "未啟動")
         tier_label = f"［{tier}］" if tier != "未啟動" else ""

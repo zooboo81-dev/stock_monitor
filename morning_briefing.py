@@ -110,8 +110,8 @@ def main():
     today = datetime.now()
     weekday = today.weekday()  # 0=Mon, 6=Sun
 
-    # 週末跳過
-    if weekday >= 5:
+    # 週末跳過（job_selftest 試跑時不跳，週末試跑才測得到）
+    if weekday >= 5 and not os.environ.get("STOCK_SELFTEST"):
         return
 
     # 1. 抓所有資料
@@ -130,10 +130,12 @@ def main():
     except Exception:
         regime = {"emoji": "⚪", "label": "判斷失敗"}
 
-    # 持倉
-    portfolio = pd.read_csv(PORTFOLIO_FILE, dtype={"code": str})
+    # 持倉：只拿真的有持股的列（定存區預留列、賣光留著的列、成本空白都跳過，見 holdings.py）
+    # 以前直接讀 portfolio.csv，拿定存區預留列的成本 0 當除數 → 整支晨報當掉（雲端 9/11 起每天失敗；11/24 修）
+    from holdings import load_positions
+    portfolio = load_positions(PORTFOLIO_FILE)
     codes = portfolio["code"].tolist()
-    quotes = fetch_quotes(codes)
+    quotes = fetch_quotes(codes) if codes else {}
 
     # 載入 Trailing Stop 狀態
     try:
@@ -147,46 +149,46 @@ def main():
     triggered = []   # 已跌破生效停損
     near_stop = []   # 距生效停損 < 3%
     safe_locked = []  # 鎖利 > 20%
+    bad_rows = []     # 個別一檔算不出來：記下來、略過，不讓整份晨報開天窗
     for _, r in portfolio.iterrows():
         code = r["code"]
-        name = r["name"]
-        cost = float(r["cost"])
-        sl_str = str(r.get("stop_loss", ""))
-        q = quotes.get(code)
-        if not q:
-            continue
-        px = q["price"]
-        # 定存區預留列（0 股、成本 0）不算損益：以前這裡拿 0 當除數，整支晨報當掉（雲端 9/11 之後每天失敗的原因）
-        if cost <= 0:
-            continue
-        pnl_pct = (px - cost) / cost * 100
-        if not sl_str or sl_str == "nan" or sl_str == "":
-            continue
         try:
-            fixed_sl = float(sl_str)
-        except ValueError:
-            continue
+            q = quotes.get(code)
+            if not q:
+                continue
+            name = r["name"]
+            cost = r["cost_n"]          # load_positions 保證 > 0
+            px = q["price"]
+            pnl_pct = (px - cost) / cost * 100
+            fixed_sl = r["stop_n"]      # 0 ＝ 沒設固定停損
 
-        # 計算 Trailing Stop
-        tier = "未啟動"
-        trail_sl = 0.0
-        if compute_trail_stop and code in trail_state:
-            peak = trail_state[code]["peak"]
-            trail_sl, tier = compute_trail_stop(cost, peak)
-        eff_sl = effective_stop(fixed_sl, trail_sl) if effective_stop else fixed_sl
+            # 計算 Trailing Stop
+            tier = "未啟動"
+            trail_sl = 0.0
+            if compute_trail_stop and code in trail_state:
+                peak = trail_state[code]["peak"]
+                trail_sl, tier = compute_trail_stop(cost, peak)
+            eff_sl = effective_stop(fixed_sl, trail_sl) if effective_stop else fixed_sl
+            if not eff_sl > 0:
+                continue                # 沒設停損、移動停利也還沒啟動：沒有停損可比（跟盤中警示一致）
 
-        dist = (px - eff_sl) / eff_sl * 100 if eff_sl > 0 else 0
-        item = {
-            "code": code, "name": name, "cost": cost, "price": px,
-            "stop": eff_sl, "pnl_pct": pnl_pct, "dist_pct": dist,
-            "tier": tier, "fixed_stop": fixed_sl, "trail_stop": trail_sl,
-        }
-        if px <= eff_sl:
-            triggered.append(item)
-        elif dist < 3:
-            near_stop.append(item)
-        elif pnl_pct > 20:
-            safe_locked.append(item)
+            dist = (px - eff_sl) / eff_sl * 100
+            item = {
+                "code": code, "name": name, "cost": cost, "price": px,
+                "stop": eff_sl, "pnl_pct": pnl_pct, "dist_pct": dist,
+                "tier": tier, "fixed_stop": fixed_sl, "trail_stop": trail_sl,
+            }
+            if px <= eff_sl:
+                triggered.append(item)
+            elif dist < 3:
+                near_stop.append(item)
+            elif pnl_pct > 20:
+                safe_locked.append(item)
+        except Exception as e:
+            if os.environ.get("STOCK_SELFTEST"):
+                raise                   # 試跑時要大聲失敗，問題才抓得到
+            bad_rows.append(f"{code}（{type(e).__name__}）")
+            print(f"⚠️ {code} 算不出來，先略過：{type(e).__name__}: {e}", file=sys.stderr)
 
     # 重要事件（未來 7 天）
     events = upcoming_events(7)
@@ -230,7 +232,9 @@ def main():
             for it in near_stop[:5]:
                 msg += f"\n• {it['name']} {it['code']}  停損 {it['stop']:.2f}（現 {it['price']:.2f}, 距 {it['dist_pct']:+.2f}%）"
     else:
-        msg = regime_line + txf_line + "\n\n✓ 所有持倉安全"
+        msg = regime_line + txf_line + ("" if bad_rows else "\n\n✓ 所有持倉安全")
+    if bad_rows:
+        msg += f"\n\n⚠️ {len(bad_rows)} 檔資料有問題、這次先略過：" + "、".join(bad_rows[:5])
 
     # 📉 TAIEX MA 抄底訊號
     try:
