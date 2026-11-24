@@ -1262,5 +1262,19 @@
   "pc_oi_ratio": 30.9,
   "foreign_spot_yi": -289.48,
   "usdtwd": 32.866
+ },
+ "2026-11-24": {
+  "fut_foreign_net": -103182,
+  "mxf_inst_net": 3826,
+  "mtx_oi": 33055,
+  "retail_ratio": -11.57,
+  "pc_oi_ratio": 45.96,
+  "foreign_spot_yi": -503.9,
+  "up_count": 1053,
+  "limit_up": 335,
+  "down_count": 26,
+  "limit_down": 4,
+  "usdtwd": 32.896,
+  "taiex": 40122.3516
  }
 }
