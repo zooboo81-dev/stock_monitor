@@ -1,34 +1,34 @@
 {
  "as_of": "2026-11-24",
- "generated_at": "2026-11-24T16:40:43+08:00",
- "score": 3.5,
+ "generated_at": "2026-11-24T21:35:37+08:00",
+ "score": 4.0,
  "max": 8,
  "available": 8,
  "threshold": 4,
- "reached": false,
+ "reached": true,
  "active": true,
  "active_gate_pct": -10,
- "verdict": "未達 4 分門檻：資料包規則＝維持小部位、照跌幅分批",
+ "verdict": "已達 4 分門檻：資料包規則＝可以放大部位",
  "indicators": [
   {
    "id": "margin_maintenance_ratio",
    "name": "融資維持率",
    "core": true,
-   "value": "148.5%",
-   "as_of": "2026-11-23",
+   "value": "162.1%",
+   "as_of": "2026-11-24",
    "lit": "partial",
    "rule": "近 3 日最低 ≤140% 完全符合、<150% 初步（自家算法歷史大底 130～148%）",
-   "detail": "近 37 個交易日最低 140.4%（11/20）"
+   "detail": "近 38 個交易日最低 140.4%（11/20）"
   },
   {
    "id": "forced_selling",
    "name": "融資斷頭潮",
    "core": true,
-   "value": "-0.33%（-14 億）",
-   "as_of": "2026-11-23",
-   "lit": "partial",
+   "value": "+4.54%（+197 億）",
+   "as_of": "2026-11-24",
+   "lit": "yes",
    "rule": "出現 ≤-2.5% 斷頭日後，之後連 2 日減幅都不到最後斷頭日的一半",
-   "detail": "最後斷頭日 11/20（-10.1%）已過，等連 2 日收斂"
+   "detail": "最後斷頭日 11/20（-10.1%）後，連 2 日減幅都不到一半"
   },
   {
    "id": "foreign_futures_net_short",
@@ -94,21 +94,21 @@
    "id": "tw_vix",
    "name": "台指VIX",
    "core": false,
-   "value": "55.36",
-   "as_of": "2026-11-23",
-   "lit": "no",
+   "value": "26.18",
+   "as_of": "2026-11-24",
+   "lit": "partial",
    "rule": "衝上 40 以上後連 2 天收低（參考、不計分）",
-   "detail": "今天創近 10 日新高"
+   "detail": "高點 55.4（11/23）後連 1 天收低"
   },
   {
    "id": "us_vix",
    "name": "美股VIX",
    "core": false,
-   "value": "35.89",
-   "as_of": "2026-11-20",
-   "lit": "no",
+   "value": "26.62",
+   "as_of": "2026-11-23",
+   "lit": "partial",
    "rule": "衝上 30 以上後連 2 天收低（參考、不計分）",
-   "detail": "今天創近 10 日新高"
+   "detail": "高點 35.9（11/23）後連 1 天收低"
   }
  ],
  "score_history": [
@@ -184,7 +184,7 @@
   },
   {
    "date": "2026-11-24",
-   "score": 3.5,
+   "score": 4.0,
    "active": true
   }
  ],
@@ -227,5 +227,5 @@
   "deployed_twd": 1200000.0,
   "deploy_idx": 3
  },
- "push_level": 2
+ "push_level": 4
 }
