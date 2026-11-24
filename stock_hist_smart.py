@@ -6,10 +6,56 @@
 用法：
   from stock_hist_smart import fetch_hist
   hist = fetch_hist('6274', period='2y')  # 自動處理上市/上櫃
+
+永豐 Shioaji 金鑰（2026-11-24 起不再寫在程式裡；這個倉庫是公開的）：
+  依序找，找到就用，兩個檔都不上 GitHub：
+    1. 本資料夾的 shioaji_keys.txt
+    2. 台指期記分板的 C:\\Users\\<你>\\txf-backtest\\API key.txt（同一組金鑰，換金鑰只要改這一個）
+  格式跟記分板一樣，記事本打兩行：
+    API_KEY=你的_API_Key
+    SECRET_KEY=你的_Secret_Key
+  都找不到 → 直接跳過 Shioaji 這個備援，不會當掉（排程試跑的沙盒刻意不放金鑰、也不去別的資料夾找）。
 """
 from __future__ import annotations
+import os
+from pathlib import Path
+
 import pandas as pd
 import yfinance as yf
+
+KEY_FILE = Path(__file__).resolve().parent / "shioaji_keys.txt"
+SHARED_KEY_FILE = Path.home() / "txf-backtest" / "API key.txt"
+
+
+def _read_key_file(p: Path) -> tuple[str, str] | None:
+    """讀 API_KEY=… / SECRET_KEY=… 兩行（# 開頭當註解）。檔案不在或格式不對 → None"""
+    try:
+        text = p.read_text(encoding="utf-8-sig", errors="ignore")
+    except OSError:
+        return None
+    creds = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        creds[k.strip().upper()] = v.strip().strip('"').strip("'")
+    api_key, secret = creds.get("API_KEY"), creds.get("SECRET_KEY")
+    if not api_key or not secret or api_key.startswith("你的") or secret.startswith("你的"):
+        return None
+    return api_key, secret
+
+
+def load_shioaji_keys() -> tuple[str, str] | None:
+    """回傳 (api_key, secret_key)；找不到金鑰檔 → None（呼叫的人自己跳過 Shioaji）"""
+    candidates = [KEY_FILE]
+    if os.environ.get("STOCK_SELFTEST") != "1":   # 試跑沙盒：只看沙盒自己（裡面沒有金鑰）
+        candidates.append(SHARED_KEY_FILE)
+    for p in candidates:
+        keys = _read_key_file(p)
+        if keys:
+            return keys
+    return None
 
 
 def fetch_hist(code: str, period: str = "2y") -> pd.DataFrame | None:
@@ -30,18 +76,16 @@ def fetch_hist(code: str, period: str = "2y") -> pd.DataFrame | None:
     except Exception:
         pass
 
-    # 3) Shioaji fallback（Volume 不可信，須警告）
+    # 3) Shioaji fallback（Volume 不可信，須警告）；沒有金鑰檔就跳過
+    keys = load_shioaji_keys()
+    if keys is None:
+        return None
+    api = None
     try:
         import shioaji as sj
         import datetime
-        import json
-        from pathlib import Path
-        # 讀 config
-        cfg_file = Path(__file__).parent / "shioaji_keys.txt"
-        api_key = "GRUPpRWf8re56aU2KDJ7BcxQHw3BBPyvF5ZXwQ4kCDSc"
-        secret_key = "7XGnDBs8FgczRfWw2yGuJ9ppSZpEmqnHh7jVZYSMFX3H"
         api = sj.Shioaji(simulation=False)
-        api.login(api_key, secret_key, contracts_timeout=20000)
+        api.login(api_key=keys[0], secret_key=keys[1], contracts_timeout=20000)
         contract = None
         for src in [api.Contracts.Stocks.OTC, api.Contracts.Stocks.TSE]:
             try:
@@ -52,7 +96,6 @@ def fetch_hist(code: str, period: str = "2y") -> pd.DataFrame | None:
             except KeyError:
                 continue
         if contract is None:
-            api.logout()
             return None
 
         # 分批抓 30 天內
@@ -74,12 +117,15 @@ def fetch_hist(code: str, period: str = "2y") -> pd.DataFrame | None:
         ).reset_index()
         daily["Volume"] = -1  # ★ 標記為不可信（避免流動性判斷用錯）
         daily["date_idx"] = pd.to_datetime(daily["date"])
-        api.logout()
         return daily.set_index("date_idx")[["Open", "High", "Low", "Close", "Volume"]]
-    except Exception:
-        pass
-
-    return None
+    except Exception:   # 套件沒裝／被 Windows 擋、金鑰作廢、登入失敗、抓不到 → 都當作這個來源沒有
+        return None
+    finally:
+        if api is not None:   # 中途出錯也要登出，免得佔住永豐的連線數
+            try:
+                api.logout()
+            except Exception:
+                pass
 
 
 def fetch_volume_reliable(code: str, days: int = 20) -> float | None:
