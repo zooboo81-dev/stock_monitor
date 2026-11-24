@@ -1241,5 +1241,26 @@
   "us_vix": 28.44,
   "us_vix_date": "2026-11-19",
   "usdtwd": 32.959
+ },
+ "2026-11-23": {
+  "taiex": 36811.89,
+  "taiex_pct": 2.16,
+  "maint_ratio": 148.46,
+  "margin_yi": 4338.08,
+  "margin_chg_yi": -14.2,
+  "limit_down": 9,
+  "limit_up": 43,
+  "down_count": 362,
+  "up_count": 652,
+  "tw_vix": 55.36,
+  "us_vix": 35.89,
+  "us_vix_date": "2026-11-20",
+  "fut_foreign_net": -103432,
+  "mxf_inst_net": 3708,
+  "mtx_oi": 31854,
+  "retail_ratio": -11.64,
+  "pc_oi_ratio": 30.9,
+  "foreign_spot_yi": -289.48,
+  "usdtwd": 32.866
  }
 }
