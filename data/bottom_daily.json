@@ -1283,5 +1283,19 @@
   "tw_vix": 26.18,
   "us_vix": 26.62,
   "us_vix_date": "2026-11-23"
+ },
+ "2026-11-25": {
+  "fut_foreign_net": -105709,
+  "mxf_inst_net": -332,
+  "mtx_oi": 33876,
+  "retail_ratio": 0.98,
+  "pc_oi_ratio": 39.84,
+  "foreign_spot_yi": -1236.55,
+  "up_count": 39,
+  "limit_up": 4,
+  "down_count": 1033,
+  "limit_down": 46,
+  "usdtwd": 33.178,
+  "taiex": 38195.4297
  }
 }
