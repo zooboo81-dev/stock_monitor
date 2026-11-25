@@ -1296,6 +1296,13 @@
   "down_count": 1033,
   "limit_down": 46,
   "usdtwd": 33.178,
-  "taiex": 38195.4297
+  "taiex": 38195.43,
+  "taiex_pct": -4.8,
+  "maint_ratio": 151.61,
+  "margin_yi": 4341.38,
+  "margin_chg_yi": -193.67,
+  "tw_vix": 58.38,
+  "us_vix": 26.36,
+  "us_vix_date": "2026-11-24"
  }
 }
