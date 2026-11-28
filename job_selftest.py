@@ -55,7 +55,7 @@ JOB_CAP_SEC = 900       # 單一工作最多等幾秒（超過記「太慢」，
 TOTAL_CAP_SEC = 1800    # 整套最多跑幾秒（排程裡跑時，後面的工作要等它）
 
 # 不複製進沙盒：版本庫、金鑰（沙盒沒有金鑰 → 就算 STOCK_DRY_RUN 漏接也推不出去）、個人日誌、本機狀態
-SKIP_DIRS = {".git", "__pycache__", "data_export", "tssco_sync", "cathay_sync", "verify_bundle", ".claude",
+SKIP_DIRS = {".git", "__pycache__", "data_export", "tssco_sync", "cathay_sync", "sinopac_sync", "verify_bundle", ".claude",
              ".venv", "venv", "trades"}
 SKIP_FILES = {
     "telegram_config.json", "pushover_config.json", "shioaji_config.json", "shioaji_keys.txt",

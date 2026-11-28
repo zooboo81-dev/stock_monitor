@@ -1,0 +1,9 @@
+# 永豐月對帳單同步：整個資料夾不上 GitHub（設定檔指到密碼，PDF 與清單含個資）
+# 只保留下面明確列出的程式碼方便備份（不用 *.py 整批放行：臨時寫的除錯檔不可以跟著上去）
+*
+!.gitignore
+!parse_sinopac.py
+!sync_sinopac.py
+!selftest_parse.py
+!執行同步.bat
+!requirements.txt
